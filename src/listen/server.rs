@@ -2,11 +2,18 @@ use std::path::Path;
 use std::sync::Arc;
 use tokio::net::{ UnixListener, UnixStream };
 use tokio::net::unix::SocketAddr;
+use serde::{ Serialize, Deserialize };
 
 
 pub struct Server {
     obj: Arc<object::File<'static>>,
     listener: UnixListener
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct Command<'a> {
+    name: &'a str,
+    args: Vec<&'a str>
 }
 
 impl Server {
@@ -21,8 +28,9 @@ impl Server {
     pub async fn listen(&self) -> anyhow::Result<()> {
         loop {
             let (stream, addr) = self.listener.accept().await?;
+            let obj = Arc::clone(&self.obj);
             tokio::spawn(async move {
-                if let Err(err) = exec(stream, addr).await {
+                if let Err(err) = exec(obj, stream, addr).await {
                     eprintln!("ipc error: {:?}", err);
                 }
             });
@@ -30,7 +38,11 @@ impl Server {
     }
 }
 
-async fn exec(mut stream: UnixStream, addr: SocketAddr) -> anyhow::Result<()> {
+async fn exec(
+    obj: Arc<object::File<'static>>,
+    mut stream: UnixStream,
+    addr: SocketAddr
+) -> anyhow::Result<()> {
     use tokio::io::{ AsyncReadExt, AsyncWriteExt };
 
     let mut buf = Vec::new();
@@ -41,6 +53,8 @@ async fn exec(mut stream: UnixStream, addr: SocketAddr) -> anyhow::Result<()> {
         let len = stream.read_u32().await?;
         buf.clear();
         stream.take(len.into()).read_to_end(&mut buf).await?;
+
+        let cmd: Command<'_> = cbor4ii::serde::from_slice(&buf)?;
 
         //
     }
