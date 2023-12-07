@@ -1,0 +1,24 @@
+[package]
+name = "fi"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+# cli
+anyhow = "1"
+bstr = "1"
+clap = { version = "4", features = [ "derive" ] }
+
+# ipc
+directories = "5"
+tokio = { version = "1", features = [ "rt", "rt-multi-thread", "sync", "net", "io-util", "signal", "macros" ] }
+serde = { version = "1", features = [ "derive" ] }
+cbor4ii = { version = "0.3", features = [ "use_std", "serde1" ] }
+data-encoding = "2"
+scopeguard = "1"
+
+# object
+memmap2 = "0.9"
+object = "0.32"
