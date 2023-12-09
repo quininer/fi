@@ -242,6 +242,7 @@ dependencies = [
  "scopeguard",
  "serde",
  "tokio",
+ "tokio-linux-zio",
 ]
 
 [[package]]
@@ -553,6 +554,16 @@ dependencies = [
  "socket2",
  "tokio-macros",
  "windows-sys 0.48.0",
+]
+
+[[package]]
+name = "tokio-linux-zio"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f63437c36fd88fc99c12c4946f8d98fd9c5dcb062f2bdefd8424c1b1d36ab198"
+dependencies = [
+ "libc",
+ "tokio",
 ]
 
 [[package]]

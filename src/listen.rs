@@ -1,16 +1,19 @@
 mod server;
 
-use std::{ io, fs };
+use std::{ io, fs, env };
 use std::path::PathBuf;
 use std::sync::OnceLock;
 use clap::Args;
+use serde::{ Serialize, Deserialize };
 use directories::ProjectDirs;
 use memmap2::{ MmapOptions, Mmap };
 use object::Object;
 use crate::util::hashname;
+use crate::call::SESSION_ENVNAME;
 use server::Server;
 
 
+#[derive(Serialize, Deserialize)]
 #[derive(Debug, Args)]
 #[command(args_conflicts_with_subcommands = true)]
 #[command(flatten_help = true)]
@@ -22,7 +25,9 @@ static TARGET: OnceLock<Mmap> = OnceLock::new();
 
 impl Command {
     pub fn exec(self, dir: ProjectDirs) -> anyhow::Result<()> {
-        let ipc_path = {
+        let ipc_path = if let Some(ipc_path) = env::var_os(SESSION_ENVNAME) {
+            PathBuf::from(ipc_path)
+        } else {
             let dir = dir.runtime_dir()
                 .unwrap_or_else(|| dir.cache_dir());
 
@@ -53,7 +58,7 @@ impl Command {
                 fs::remove_file(&ipc_path).unwrap();
             }
 
-            println!("set -x FI_SESSION {}", ipc_path.display());
+            println!("set -x {} {}", SESSION_ENVNAME, ipc_path.display());
 
             tokio::select!{
                 ret = tokio::signal::ctrl_c() => ret?,

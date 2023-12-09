@@ -22,3 +22,6 @@ scopeguard = "1"
 # object
 memmap2 = "0.9"
 object = "0.32"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+tokio-linux-zio = "0.3.1"

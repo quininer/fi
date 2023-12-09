@@ -1,12 +1,17 @@
 mod listen;
+mod call;
+mod search;
 mod util;
 
 use anyhow::Context;
 use clap::{ Parser, Subcommand };
+use serde::{ Serialize, Deserialize };
 use directories::ProjectDirs;
+use tokio::net::UnixStream;
 
 
 /// Fi - binary analysis tools
+#[derive(Serialize, Deserialize)]
 #[derive(Debug, Parser)] // requires `derive` feature
 #[command(name = "fi")]
 struct Options {
@@ -15,9 +20,11 @@ struct Options {
 }
 
 
+#[derive(Serialize, Deserialize)]
 #[derive(Debug, Subcommand)]
 enum Commands {
-    Listen(listen::Command)
+    Listen(listen::Command),
+    Search(search::Command)
 }
 
 fn main() -> anyhow::Result<()> {
@@ -26,6 +33,16 @@ fn main() -> anyhow::Result<()> {
         .context("not found project dirs")?;
 
     match options.command {
-        Commands::Listen(cmd) => cmd.exec(dir)
+        Commands::Listen(cmd) => cmd.exec(dir),
+        _ => call::call(&options)
+    }
+}
+
+impl Commands {
+    async fn exec(self, stream: &mut UnixStream) -> anyhow::Result<()> {
+        match self {
+            Commands::Listen(_) => Ok(()),
+            Commands::Search(cmd) => cmd.exec(stream).await
+        }
     }
 }

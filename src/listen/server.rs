@@ -2,18 +2,12 @@ use std::path::Path;
 use std::sync::Arc;
 use tokio::net::{ UnixListener, UnixStream };
 use tokio::net::unix::SocketAddr;
-use serde::{ Serialize, Deserialize };
+use crate::Options;
 
 
 pub struct Server {
     obj: Arc<object::File<'static>>,
     listener: UnixListener
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct Command<'a> {
-    name: &'a str,
-    args: Vec<&'a str>
 }
 
 impl Server {
@@ -45,17 +39,12 @@ async fn exec(
 ) -> anyhow::Result<()> {
     use tokio::io::{ AsyncReadExt, AsyncWriteExt };
 
-    let mut buf = Vec::new();
+    let len = stream.read_u16_le().await?;
+    let mut buf = vec![0; len.into()];
+    stream.read_exact(&mut buf).await?;
 
-    loop {
-        let stream = &mut stream;
+    let cmd: Options = cbor4ii::serde::from_slice(&buf)?;
+    cmd.command.exec(&mut stream).await?;
 
-        let len = stream.read_u32().await?;
-        buf.clear();
-        stream.take(len.into()).read_to_end(&mut buf).await?;
-
-        let cmd: Command<'_> = cbor4ii::serde::from_slice(&buf)?;
-
-        //
-    }
+    Ok(())
 }
