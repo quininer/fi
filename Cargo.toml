@@ -12,6 +12,7 @@ bstr = "1"
 clap = { version = "4", features = [ "derive" ] }
 
 # ipc
+libc = "0.2"
 directories = "5"
 tokio = { version = "1", features = [ "rt", "rt-multi-thread", "sync", "net", "io-util", "signal", "macros" ] }
 serde = { version = "1", features = [ "derive" ] }
@@ -30,6 +31,3 @@ symbolic-demangle = { version = "12", default-features = false, features = [
 	"msvc"
 ] }
 addr2line = "0.21"
-
-[target.'cfg(target_os = "linux")'.dependencies]
-tokio-linux-zio = "0.3.1"
