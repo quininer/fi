@@ -1,5 +1,6 @@
 mod listen;
 mod call;
+mod explorer;
 mod search;
 mod util;
 
@@ -8,6 +9,7 @@ use clap::{ Parser, Subcommand };
 use serde::{ Serialize, Deserialize };
 use directories::ProjectDirs;
 use tokio::net::UnixStream;
+use explorer::Explorer;
 
 
 /// Fi - binary analysis tools
@@ -34,15 +36,17 @@ fn main() -> anyhow::Result<()> {
 
     match options.command {
         Commands::Listen(cmd) => cmd.exec(dir),
-        _ => call::call(&options)
+        _ => call::call(dir, &options)
     }
 }
 
 impl Commands {
-    async fn exec(self, stream: &mut UnixStream) -> anyhow::Result<()> {
+    async fn exec(self, explorer: &Explorer, stream: UnixStream)
+        -> anyhow::Result<()>
+    {
         match self {
             Commands::Listen(_) => Ok(()),
-            Commands::Search(cmd) => cmd.exec(stream).await
+            Commands::Search(cmd) => cmd.exec(explorer, stream).await
         }
     }
 }

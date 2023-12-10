@@ -1,30 +1,30 @@
 use std::path::Path;
 use std::sync::Arc;
 use tokio::net::{ UnixListener, UnixStream };
-use tokio::net::unix::SocketAddr;
 use crate::Options;
+use crate::explorer::Explorer;
 
 
 pub struct Server {
-    obj: Arc<object::File<'static>>,
+    explorer: Arc<Explorer>,
     listener: UnixListener
 }
 
 impl Server {
-    pub async fn new(ipc_path: &Path, obj: object::File<'static>)
+    pub async fn new(ipc_path: &Path, explorer: Explorer)
         -> anyhow::Result<Self>
     {
-        let obj = Arc::new(obj);
+        let explorer = Arc::new(explorer);
         let listener = UnixListener::bind(ipc_path)?;
-        Ok(Server { obj, listener })
+        Ok(Server { explorer, listener })
     }
 
     pub async fn listen(&self) -> anyhow::Result<()> {
         loop {
-            let (stream, addr) = self.listener.accept().await?;
-            let obj = Arc::clone(&self.obj);
+            let (stream, _) = self.listener.accept().await?;
+            let explorer = Arc::clone(&self.explorer);
             tokio::spawn(async move {
-                if let Err(err) = exec(obj, stream, addr).await {
+                if let Err(err) = exec(&explorer, stream).await {
                     eprintln!("ipc error: {:?}", err);
                 }
             });
@@ -33,18 +33,20 @@ impl Server {
 }
 
 async fn exec(
-    obj: Arc<object::File<'static>>,
+    explorer: &Explorer,
     mut stream: UnixStream,
-    addr: SocketAddr
 ) -> anyhow::Result<()> {
-    use tokio::io::{ AsyncReadExt, AsyncWriteExt };
+    use tokio::io::AsyncReadExt;
 
     let len = stream.read_u16_le().await?;
     let mut buf = vec![0; len.into()];
     stream.read_exact(&mut buf).await?;
 
     let cmd: Options = cbor4ii::serde::from_slice(&buf)?;
-    cmd.command.exec(&mut stream).await?;
+
+    println!("{:?} {:?}", stream.peer_cred()?.pid(), cmd);
+
+    cmd.command.exec(explorer, stream).await?;
 
     Ok(())
 }

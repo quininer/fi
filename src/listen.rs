@@ -2,14 +2,12 @@ mod server;
 
 use std::{ io, fs, env };
 use std::path::PathBuf;
-use std::sync::OnceLock;
 use clap::Args;
 use serde::{ Serialize, Deserialize };
 use directories::ProjectDirs;
-use memmap2::{ MmapOptions, Mmap };
-use object::Object;
 use crate::util::hashname;
 use crate::call::SESSION_ENVNAME;
+use crate::explorer::Explorer;
 use server::Server;
 
 
@@ -20,8 +18,6 @@ use server::Server;
 pub struct Command {
     path: PathBuf
 }
-
-static TARGET: OnceLock<Mmap> = OnceLock::new();
 
 impl Command {
     pub fn exec(self, dir: ProjectDirs) -> anyhow::Result<()> {
@@ -40,19 +36,14 @@ impl Command {
             dir.join(hashname(&self.path))
         };
 
-        let fd = fs::File::open(&self.path)?;
-        let mmap = unsafe {
-            MmapOptions::new().map_copy_read_only(&fd)?
-        };
-        let mmap = TARGET.get_or_init(move || mmap);
-        let obj = object::File::parse(mmap.as_ref())?;
+        let explorer = Explorer::open(&self.path)?;
 
         let rt = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()?;
 
         rt.block_on(async move {
-            let server = Server::new(&ipc_path, obj).await?;
+            let server = Server::new(&ipc_path, explorer).await?;
 
             scopeguard::defer!{
                 fs::remove_file(&ipc_path).unwrap();

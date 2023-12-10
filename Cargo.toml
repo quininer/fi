@@ -22,6 +22,14 @@ scopeguard = "1"
 # object
 memmap2 = "0.9"
 object = "0.32"
+indexmap = "2"
+aho-corasick = "1"
+symbolic-demangle = { version = "12", default-features = false, features = [
+	"rust",
+	"cpp",
+	"msvc"
+] }
+addr2line = "0.21"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 tokio-linux-zio = "0.3.1"

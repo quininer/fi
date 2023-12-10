@@ -1,31 +1,46 @@
 use std::{ io, env, future };
-use std::path::Path;
+use std::path::PathBuf;
 use std::net::Shutdown;
-use std::os::fd::{ AsRawFd, RawFd };
+use std::os::fd::AsRawFd;
 use std::os::unix::net::UnixStream;
 use anyhow::Context;
-use tokio::task::LocalSet;
+use directories::ProjectDirs;
 use tokio::io::unix::AsyncFd;
-use tokio::io::{ Interest, AsyncWriteExt };
 use tokio_linux_zio as zio;
 use crate::Options;
 
 
 pub const SESSION_ENVNAME: &str = "FI_SESSION";
 
-pub fn call(options: &Options) -> anyhow::Result<()> {
-    let ipc_path = env::var_os(SESSION_ENVNAME)
-        .context("not found session")?;
-    let ipc_path = Path::new(&ipc_path);
+pub fn call(dir: ProjectDirs, options: &Options) -> anyhow::Result<()> {
+    let ipc_path = if let Some(ipc_path) = env::var_os(SESSION_ENVNAME) {
+        PathBuf::from(ipc_path)
+    } else {
+        use std::os::unix::fs::FileTypeExt;
+
+        let dir = dir.runtime_dir()
+            .unwrap_or_else(|| dir.cache_dir());
+        let mut found = None;
+
+        for entry in std::fs::read_dir(dir)? {
+            let entry = entry?;
+
+            if entry.file_type()?.is_socket() {
+                found = Some(entry.path());
+            }
+        }
+
+        found.context("not found any ipc path")?
+    };
 
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
 
-    rt.block_on(exec(&ipc_path, options))
+    rt.block_on(exec(ipc_path, options))
 }
 
-async fn exec(ipc_path: &Path, options: &Options) -> anyhow::Result<()> {
+async fn exec(ipc_path: PathBuf, options: &Options) -> anyhow::Result<()> {
     let mut stream = UnixStream::connect(ipc_path).context("session connect failed")?;
 
     {
