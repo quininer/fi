@@ -11,6 +11,7 @@ use crate::explorer::Explorer;
 use server::Server;
 
 
+/// open file and listen ipc
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Args)]
 #[command(args_conflicts_with_subcommands = true)]
