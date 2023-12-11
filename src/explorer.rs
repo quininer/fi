@@ -88,7 +88,7 @@ impl Cache {
             for sym in obj.symbols() {
                 let sym_name = match sym.name() {
                     Ok(name) => name,
-                    Err(err) => {
+                    Err(_err) => {
                         // TODO warn
                         continue
                     }

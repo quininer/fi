@@ -19,6 +19,7 @@ serde = { version = "1", features = [ "derive" ] }
 cbor4ii = { version = "0.3", features = [ "use_std", "serde1" ] }
 data-encoding = "2"
 scopeguard = "1"
+passfd = "0.1"
 
 # object
 memmap2 = "0.9"

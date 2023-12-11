@@ -8,6 +8,7 @@ use bstr::ByteSlice;
 use object::{ Object, ObjectSymbol };
 use symbolic_demangle::demangle;
 use crate::explorer::Explorer;
+use crate::util::Stdio;
 
 
 /// search symbol name and data
@@ -29,27 +30,14 @@ pub struct Command {
 }
 
 impl Command {
-    pub async fn exec(self, explorer: &Explorer, mut stream: UnixStream) -> anyhow::Result<()> {
-        if let Err(err) = exec(&self, explorer, &mut stream).await {
-            let err = format!("search failed: {:?}", err);
-            stream.write_all(err.as_bytes()).await?;
+    pub async fn exec(self, explorer: &Explorer, mut stdio: Stdio) -> anyhow::Result<()> {
+        let ac = AhoCorasick::new(&self.keywords)?;
+
+        match (explorer.obj.has_debug_symbols(), self.data) {
+            (true, false) => by_symbol(&self, &ac, explorer, &mut stdio).await,
+            (false, false) => anyhow::bail!("no debug symbols"),
+            (_, true) => by_data(&self, &ac, explorer, &mut stdio).await
         }
-
-        stream.flush().await?;
-
-        Ok(())
-    }
-}
-
-async fn exec(cmd: &Command, explorer: &Explorer, stream: &mut UnixStream)
-    -> anyhow::Result<()>
-{
-    let ac = AhoCorasick::new(&cmd.keywords)?;
-
-    match (explorer.obj.has_debug_symbols(), cmd.data) {
-        (true, false) => by_symbol(cmd, &ac, explorer, stream).await,
-        (false, false) => anyhow::bail!("no debug symbols"),
-        (_, true) => by_data(cmd, &ac, explorer, stream).await
     }
 }
 
@@ -57,7 +45,7 @@ async fn by_symbol(
     cmd: &Command,
     ac: &AhoCorasick,
     explorer: &Explorer,
-    stream: &mut UnixStream
+    stdio: &mut Stdio
 )
     -> anyhow::Result<()>
 {
@@ -86,7 +74,7 @@ async fn by_symbol(
                 kind,
                 name,
             )?;
-            stream.write_all(&output).await?;
+            stdio.stdout.write_all(&output)?;
         }
     }
 
@@ -97,7 +85,7 @@ async fn by_data(
     cmd: &Command,
     ac: &AhoCorasick,
     explorer: &Explorer,
-    stream: &mut UnixStream
+    stdio: &mut Stdio
 )
     -> anyhow::Result<()>
 {

@@ -1,8 +1,13 @@
-use std::path::Path;
+use std::fs::File;
 use std::sync::Arc;
+use std::path::Path;
+use std::os::fd::FromRawFd;
+use tokio::io::{ AsyncReadExt, AsyncWriteExt };
 use tokio::net::{ UnixListener, UnixStream };
 use crate::Options;
+use crate::call::{ Start, Exit, ExitCode };
 use crate::explorer::Explorer;
+use crate::util::{ Stdio, recv_fd };
 
 
 pub struct Server {
@@ -36,17 +41,34 @@ async fn exec(
     explorer: &Explorer,
     mut stream: UnixStream,
 ) -> anyhow::Result<()> {
-    use tokio::io::AsyncReadExt;
-
     let len = stream.read_u16_le().await?;
     let mut buf = vec![0; len.into()];
     stream.read_exact(&mut buf).await?;
 
-    let cmd: Options = cbor4ii::serde::from_slice(&buf)?;
+    let start: Start = cbor4ii::serde::from_slice(&buf)?;
 
-    println!("{:?} {:?}", stream.peer_cred()?.pid(), cmd);
+    println!("{:?} {:?}", stream.peer_cred()?.pid(), &start.options);
 
-    cmd.command.exec(explorer, stream).await?;
+    let stdin = recv_fd(&stream).await?;
+    let stdout = recv_fd(&stream).await?;
+    let stderr = recv_fd(&stream).await?;
+    let stdio = unsafe {
+        Stdio {
+            stdin: File::from_raw_fd(stdin),
+            stdout: File::from_raw_fd(stdout),
+            stderr: File::from_raw_fd(stderr)
+        }
+    };
+
+    let code = match start.options.command.exec(explorer, stdio).await {
+        Ok(()) => ExitCode::Ok,
+        Err(_err) => ExitCode::Failure
+    };
+    let exit = Exit { code };
+    let buf = cbor4ii::serde::to_vec(Vec::new(), &exit)?;
+
+    stream.write_all(&buf).await?;
+    stream.flush().await?;
 
     Ok(())
 }
