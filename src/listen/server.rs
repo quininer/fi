@@ -66,7 +66,9 @@ async fn exec(
     };
     let exit = Exit { code };
     let buf = cbor4ii::serde::to_vec(Vec::new(), &exit)?;
+    let len: u16 = buf.len().try_into()?;
 
+    stream.write_all(&len.to_le_bytes()).await?;
     stream.write_all(&buf).await?;
     stream.flush().await?;
 
