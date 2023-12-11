@@ -25,9 +25,7 @@ pub struct Stdio {
     pub stderr: File
 }
 
-pub async fn recv_fd(mut stream: &UnixStream)
-    -> io::Result<RawFd>
-{
+pub async fn recv_fd(stream: &UnixStream) -> io::Result<RawFd> {
     use std::os::fd::AsRawFd;
     use passfd::FdPassingExt;
 

@@ -1,8 +1,6 @@
 use std::io::Write;
 use clap::Args;
 use serde::{ Serialize, Deserialize };
-use tokio::io::{ AsyncReadExt, AsyncWriteExt };
-use tokio::net::UnixStream;
 use aho_corasick::AhoCorasick;
 use bstr::ByteSlice;
 use object::{ Object, ObjectSymbol };
@@ -30,13 +28,13 @@ pub struct Command {
 }
 
 impl Command {
-    pub async fn exec(self, explorer: &Explorer, mut stdio: Stdio) -> anyhow::Result<()> {
+    pub async fn exec(self, explorer: &Explorer, stdio: &mut Stdio) -> anyhow::Result<()> {
         let ac = AhoCorasick::new(&self.keywords)?;
 
         match (explorer.obj.has_debug_symbols(), self.data) {
-            (true, false) => by_symbol(&self, &ac, explorer, &mut stdio).await,
+            (true, false) => by_symbol(&self, &ac, explorer, stdio).await,
             (false, false) => anyhow::bail!("no debug symbols"),
-            (_, true) => by_data(&self, &ac, explorer, &mut stdio).await
+            (_, true) => by_data(&self, &ac, explorer, stdio).await
         }
     }
 }

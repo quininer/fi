@@ -1,15 +1,11 @@
-use std::{ env, future };
-use std::pin::Pin;
+use std::env;
 use std::path::PathBuf;
-use std::marker::Unpin;
 use std::os::fd::AsRawFd;
 use std::os::unix::net::UnixStream;
 use std::io::{ self, Read, Write };
-use std::task::{ ready, Context, Poll };
 use anyhow::Context as AnyhowContext;
 use serde::{ Serialize, Deserialize };
 use directories::ProjectDirs;
-use tokio::io::unix::AsyncFd;
 use passfd::FdPassingExt;
 use crate::Options;
 
@@ -77,9 +73,6 @@ async fn exec(ipc_path: PathBuf, options: Box<Options>) -> anyhow::Result<()> {
         stream.send_fd(io::stderr().as_raw_fd())?;
         stream.flush()?;
     }
-
-    let stdin = io::stdin();
-    let stdout = io::stdout();
 
     let mut buf = [0; 2];
     stream.read_exact(&mut buf)?;

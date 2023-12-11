@@ -1,10 +1,10 @@
 use std::fs::File;
+use std::io::Write;
 use std::sync::Arc;
 use std::path::Path;
 use std::os::fd::FromRawFd;
 use tokio::io::{ AsyncReadExt, AsyncWriteExt };
 use tokio::net::{ UnixListener, UnixStream };
-use crate::Options;
 use crate::call::{ Start, Exit, ExitCode };
 use crate::explorer::Explorer;
 use crate::util::{ Stdio, recv_fd };
@@ -52,7 +52,7 @@ async fn exec(
     let stdin = recv_fd(&stream).await?;
     let stdout = recv_fd(&stream).await?;
     let stderr = recv_fd(&stream).await?;
-    let stdio = unsafe {
+    let mut stdio = unsafe {
         Stdio {
             stdin: File::from_raw_fd(stdin),
             stdout: File::from_raw_fd(stdout),
@@ -60,9 +60,12 @@ async fn exec(
         }
     };
 
-    let code = match start.options.command.exec(explorer, stdio).await {
+    let code = match start.options.command.exec(explorer, &mut stdio).await {
         Ok(()) => ExitCode::Ok,
-        Err(_err) => ExitCode::Failure
+        Err(err) => {
+            writeln!(stdio.stderr, "exec failed: {:?}", err)?;
+            ExitCode::Failure
+        }
     };
     let exit = Exit { code };
     let buf = cbor4ii::serde::to_vec(Vec::new(), &exit)?;

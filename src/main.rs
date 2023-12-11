@@ -4,12 +4,10 @@ mod explorer;
 mod search;
 mod util;
 
-use std::process::ExitCode;
 use anyhow::Context;
 use clap::{ Parser, Subcommand };
 use serde::{ Serialize, Deserialize };
 use directories::ProjectDirs;
-use tokio::net::UnixStream;
 use explorer::Explorer;
 use crate::util::Stdio;
 
@@ -43,7 +41,7 @@ fn main() -> anyhow::Result<()> {
 }
 
 impl Commands {
-    async fn exec(self, explorer: &Explorer, stdio: Stdio)
+    async fn exec(self, explorer: &Explorer, stdio: &mut Stdio)
         -> anyhow::Result<()>
     {
         match self {
