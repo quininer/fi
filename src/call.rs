@@ -49,14 +49,10 @@ pub fn call(dir: ProjectDirs, options: Box<Options>) -> anyhow::Result<()> {
         found.context("not found any ipc path")?
     };
 
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()?;
-
-    rt.block_on(exec(ipc_path, options))
+    exec(ipc_path, options)
 }
 
-async fn exec(ipc_path: PathBuf, options: Box<Options>) -> anyhow::Result<()> {
+fn exec(ipc_path: PathBuf, options: Box<Options>) -> anyhow::Result<()> {
     let mut stream = UnixStream::connect(ipc_path).context("session connect failed")?;
 
     {
