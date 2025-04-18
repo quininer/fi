@@ -2,13 +2,20 @@ use std::io;
 use std::fs::File;
 use std::path::Path;
 use std::os::fd::RawFd;
+use std::hash::{ Hash, Hasher };
+use std::collections::hash_map::DefaultHasher;
 use tokio::net::UnixStream;
 
 
-pub fn hashname(path: &Path) -> String {
-    use std::hash::{ Hash, Hasher };
-    use std::collections::hash_map::DefaultHasher;
+pub fn hashpath(path: &Path) -> String {
+    let mut hasher = DefaultHasher::new();
+    path.as_os_str().hash(&mut hasher);
+    let out = hasher.finish();
 
+    data_encoding::HEXLOWER.encode(&out.to_le_bytes())
+}
+
+pub fn hashname(path: &Path) -> String {
     let mut hasher = DefaultHasher::new();
     std::process::id().hash(&mut hasher);
     std::time::SystemTime::now().hash(&mut hasher);

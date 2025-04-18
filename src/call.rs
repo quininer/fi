@@ -7,6 +7,7 @@ use anyhow::Context as AnyhowContext;
 use serde::{ Serialize, Deserialize };
 use directories::ProjectDirs;
 use passfd::FdPassingExt;
+use crate::util::hashpath;
 use crate::Options;
 
 
@@ -36,17 +37,28 @@ pub fn call(dir: ProjectDirs, options: Box<Options>) -> anyhow::Result<()> {
 
         let dir = dir.runtime_dir()
             .unwrap_or_else(|| dir.cache_dir());
-        let mut found = None;
+        let mut found = Vec::new();
 
         for entry in std::fs::read_dir(dir)? {
             let entry = entry?;
 
             if entry.file_type()?.is_socket() {
-                found = Some(entry.path());
+                found.push(entry.path());
             }
         }
 
-        found.context("not found any ipc path")?
+        let prefix = hashpath(&env::current_dir()?);
+
+        found.sort_by_key(|path| path.file_name()
+            .and_then(|name| name.to_str())
+            .filter(|name| name.starts_with(&prefix))
+            .is_some()
+        );
+
+        found
+            .into_iter()
+            .next()
+            .context("not found any ipc path")?
     };
 
     exec(ipc_path, options)

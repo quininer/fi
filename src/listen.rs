@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use clap::Args;
 use serde::{ Serialize, Deserialize };
 use directories::ProjectDirs;
-use crate::util::hashname;
+use crate::util::{ hashpath, hashname };
 use crate::call::SESSION_ENVNAME;
 use crate::explorer::Explorer;
 use server::Server;
@@ -33,8 +33,15 @@ impl Command {
                     io::ErrorKind::AlreadyExists => Ok(()),
                     _ => Err(err)
                 })?;
+            let cwd = env::current_dir()?;
 
-            dir.join(hashname(&self.path))
+            let path = format!(
+                "{}-{}",
+                hashpath(&cwd),
+                hashname(&self.path)
+            );
+
+            dir.join(path)
         };
 
         let explorer = Explorer::open(&self.path)?;
