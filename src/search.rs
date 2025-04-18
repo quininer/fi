@@ -1,13 +1,12 @@
 use std::io::Write;
 use clap::Args;
 use serde::{ Serialize, Deserialize };
-use anyhow::Context;
 use aho_corasick::AhoCorasick;
 use bstr::ByteSlice;
 use object::{ Object, ObjectSection, ObjectSymbol, SectionKind };
 use symbolic_demangle::demangle;
 use crate::explorer::Explorer;
-use crate::util::Stdio;
+use crate::util::{ Stdio, is_data_section };
 
 
 /// search symbol name and data
@@ -116,18 +115,7 @@ async fn by_data(
         .transpose()?;
     
     for section in explorer.obj.sections()
-        .filter(|section| matches!(
-            section.kind(),
-            SectionKind::Data
-                | SectionKind::ReadOnlyData
-                | SectionKind::ReadOnlyDataWithRel
-                | SectionKind::ReadOnlyString
-                | SectionKind::Tls
-                | SectionKind::TlsVariables
-                | SectionKind::OtherString
-                | SectionKind::DebugString
-                | SectionKind::Note
-        ))
+        .filter(|section| is_data_section(section.kind()))
     {
         // filter section by regex
         if let Some(rule) = exclude.as_ref() {

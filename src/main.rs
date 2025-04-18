@@ -2,6 +2,7 @@ mod listen;
 mod call;
 mod explorer;
 mod search;
+mod show;
 mod util;
 
 use anyhow::Context;
@@ -26,7 +27,8 @@ struct Options {
 #[derive(Debug, Subcommand)]
 enum Commands {
     Listen(listen::Command),
-    Search(search::Command)
+    Search(search::Command),
+    Show(show::Command),
 }
 
 fn main() -> anyhow::Result<()> {
@@ -46,7 +48,8 @@ impl Commands {
     {
         match self {
             Commands::Listen(_) => Ok(()),
-            Commands::Search(cmd) => cmd.exec(explorer, stdio).await
+            Commands::Search(cmd) => cmd.exec(explorer, stdio).await,
+            Commands::Show(cmd) => cmd.exec(explorer, stdio).await,
         }
     }
 }

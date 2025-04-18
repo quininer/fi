@@ -27,6 +27,7 @@ pub fn hashname(path: &Path) -> String {
 }
 
 pub struct Stdio {
+    #[allow(dead_code)]
     pub stdin: File,
     pub stdout: File,
     pub stderr: File
@@ -45,4 +46,39 @@ pub async fn recv_fd(stream: &UnixStream) -> io::Result<RawFd> {
             Err(err) => return Err(err)
         }
     }
+}
+
+pub fn u64ptr(value: &str) -> anyhow::Result<u64> {
+    use anyhow::Context;
+
+    let value = if let Some(value) = value.strip_prefix("0x") {
+        let mut buf = [0; 8];
+        let n = data_encoding::HEXLOWER_PERMISSIVE.decode_len(value.len())?;
+        let n = buf.len().checked_sub(n).context("hex value is greater than 64bit")?;
+        data_encoding::HEXLOWER_PERMISSIVE
+            .decode_mut(value.as_bytes(), &mut buf[n..])
+            .map_err(|err| anyhow::format_err!("hex decode failed: {:?}", err))?;
+        u64::from_be_bytes(buf)
+    } else {
+        value.parse::<u64>().context("number parse failed")?
+    };
+
+    Ok(value)
+}
+
+pub fn is_data_section(kind: object::read::SectionKind) -> bool {
+    use object::read::SectionKind;
+    
+    matches!(
+        kind,
+        SectionKind::Data
+            | SectionKind::ReadOnlyData
+            | SectionKind::ReadOnlyDataWithRel
+            | SectionKind::ReadOnlyString
+            | SectionKind::Tls
+            | SectionKind::TlsVariables
+            | SectionKind::OtherString
+            | SectionKind::DebugString
+            | SectionKind::Note
+    )    
 }
