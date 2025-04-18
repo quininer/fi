@@ -1,27 +1,20 @@
 use std::fs;
 use std::path::Path;
 use std::sync::OnceLock;
-use tokio::sync::{ OnceCell, RwLock };
 use memmap2::{ MmapOptions, Mmap };
-use object::{ Object, ObjectSymbol, ObjectSection };
+use object::{ Object, ObjectSymbol, ObjectSection, SectionKind };
 use indexmap::IndexMap;
 
 
 pub struct Explorer {
     pub obj: object::File<'static>,
     pub cache: Cache,
-    pub config: RwLock<Config>
 }
 
 #[derive(Default)]
 pub struct Cache {
     pub addr2sym: OnceLock<object::read::SymbolMap<object::read::SymbolMapName<'static>>>,
     pub sym2idx: OnceLock<IndexMap<&'static str, object::read::SymbolIndex>>,
-}
-
-#[derive(Default)]
-pub struct Config {
-    demangle: bool
 }
 
 static TARGET: OnceLock<Mmap> = OnceLock::new();
@@ -38,7 +31,6 @@ impl Explorer {
         Ok(Explorer {
             obj,
             cache: Cache::default(),
-            config: RwLock::new(Config::default())
         })
     }
 

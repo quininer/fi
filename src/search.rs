@@ -1,9 +1,10 @@
 use std::io::Write;
 use clap::Args;
 use serde::{ Serialize, Deserialize };
+use anyhow::Context;
 use aho_corasick::AhoCorasick;
 use bstr::ByteSlice;
-use object::{ Object, ObjectSymbol };
+use object::{ Object, ObjectSection, ObjectSymbol, SectionKind };
 use symbolic_demangle::demangle;
 use crate::explorer::Explorer;
 use crate::util::Stdio;
@@ -24,7 +25,11 @@ pub struct Command {
 
     /// search by data instead of symbol name
     #[arg(long, default_value_t = false)]
-    data: bool
+    data: bool,
+
+    /// exclude section by regex
+    #[arg(short, long)]
+    exclude_section: Option<String>,
 }
 
 impl Command {
@@ -47,9 +52,27 @@ async fn by_symbol(
 )
     -> anyhow::Result<()>
 {
-    let mut output = Vec::new();
+    let exclude = cmd.exclude_section
+        .as_ref()
+        .map(|rule| regex::Regex::new(rule))
+        .transpose()?;
+    let mut outbuf = Vec::new();
 
     for (mangled_name, &idx) in explorer.cache.sym2idx(&explorer.obj) {
+        // filter section by regex
+        if let Some(rule) = exclude.as_ref() {
+            let sym = explorer.obj.symbol_by_index(idx)?;
+            let Some(section_idx) = sym.section_index()
+                else { continue };
+            let section = explorer.obj.section_by_index(section_idx)?;
+
+            if let Ok(section_name) = section.name() {
+                if rule.is_match(section_name) {
+                    continue
+                }
+            }
+        }
+        
         let name = demangle(mangled_name);
 
         if ac.is_match(name.as_bytes())
@@ -64,15 +87,15 @@ async fn by_symbol(
                 name.as_ref()
             };
 
-            output.clear();
+            outbuf.clear();
             writeln!(
-                output,
+                outbuf,
                 "{:016x} {} {}",
                 sym.address(),
                 kind,
                 name,
             )?;
-            stdio.stdout.write_all(&output)?;
+            stdio.stdout.write_all(&outbuf)?;
         }
     }
 
@@ -87,5 +110,51 @@ async fn by_data(
 )
     -> anyhow::Result<()>
 {
-    todo!()
+    let exclude = cmd.exclude_section
+        .as_ref()
+        .map(|rule| regex::Regex::new(rule))
+        .transpose()?;
+    
+    for section in explorer.obj.sections()
+        .filter(|section| matches!(
+            section.kind(),
+            SectionKind::Data
+                | SectionKind::ReadOnlyData
+                | SectionKind::ReadOnlyDataWithRel
+                | SectionKind::ReadOnlyString
+                | SectionKind::Tls
+                | SectionKind::TlsVariables
+                | SectionKind::OtherString
+                | SectionKind::DebugString
+                | SectionKind::Note
+        ))
+    {
+        // filter section by regex
+        if let Some(rule) = exclude.as_ref() {
+            if let Ok(section_name) = section.name() {
+                if rule.is_match(section_name) {
+                    continue
+                }
+            }
+        }
+
+        // TODO less alloc
+        if let Ok(data) = section.uncompressed_data() {
+            let base = section.address();
+            
+            for mat in ac.find_iter(&data) {
+                let addr = base + mat.start() as u64;
+
+                writeln!(
+                    &mut stdio.stdout,
+                    "{:016p}\t{:?}\t{}",
+                    addr as *const (),
+                    section.name(),
+                    data[mat.range()].as_bstr()
+                )?;
+            }
+        }
+    }
+
+    Ok(())    
 }

@@ -13,17 +13,17 @@ clap = { version = "4", features = [ "derive" ] }
 
 # ipc
 libc = "0.2"
-directories = "5"
+directories = "6"
 tokio = { version = "1", features = [ "rt", "rt-multi-thread", "sync", "net", "io-util", "signal", "macros" ] }
 serde = { version = "1", features = [ "derive" ] }
-cbor4ii = { version = "0.3", features = [ "use_std", "serde1" ] }
+cbor4ii = { version = "1", features = [ "use_std", "serde1" ] }
 data-encoding = "2"
 scopeguard = "1"
 passfd = "0.1"
 
 # object
 memmap2 = "0.9"
-object = "0.32"
+object = "0.36"
 indexmap = "2"
 aho-corasick = "1"
 symbolic-demangle = { version = "12", default-features = false, features = [
@@ -31,4 +31,7 @@ symbolic-demangle = { version = "12", default-features = false, features = [
 	"cpp",
 	"msvc"
 ] }
-addr2line = "0.21"
+addr2line = "0.24"
+
+# feature
+regex = { version = "1", default-features = false, features = [ "std", "perf" ] }
