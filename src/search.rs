@@ -92,7 +92,7 @@ async fn by_symbol(
             outbuf.clear();
             writeln!(
                 outbuf,
-                "{:016x} {} {}",
+                "0x{:016x} {} {}",
                 sym.address(),
                 kind,
                 name,
@@ -141,7 +141,7 @@ async fn by_data(
 
                 writeln!(
                     &mut stdio.stdout,
-                    "{:016p}\t{:?}\t{}",
+                    "0x{:016p}\t{:?}\t{}",
                     addr as *const (),
                     section.name(),
                     data[mat.range()].as_bstr()

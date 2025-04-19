@@ -58,6 +58,7 @@ async fn by_symbol(
     let (idx, sym_idx)= match map.binary_search_by_key(&addr, |sym| sym.address()) {
         Ok(idx) => (idx, None),
         Err(idx) => {
+            let idx = idx.saturating_sub(1);
             let sym = map.get(idx).context("no available symbols found")?;
             let &sym_idx = explorer.cache.sym2idx(&explorer.obj).await
                 .get(sym.name())
@@ -138,7 +139,12 @@ async fn by_section(
     let align = cmd.align.unwrap_or_else(|| section.align());
     let data = explorer.cache.data(&explorer.obj, section.index()).await?;
 
-    // TODO addr align
+    let new_addr = (addr as *const u8).align_offset(align.try_into()?) as u64;
+    let addr = if addr == new_addr || new_addr < align {
+        addr
+    } else {
+        new_addr - align
+    };
 
     let offset = (addr - section.address()) as usize;
     let len = cmd.length.unwrap_or(256) as usize;
