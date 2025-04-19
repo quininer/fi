@@ -26,9 +26,9 @@ pub struct Command {
     #[arg(long, default_value_t = false)]
     data: bool,
 
-    /// exclude section by regex
+    /// filter section by regex
     #[arg(short, long)]
-    exclude_section: Option<String>,
+    filter_section: Option<String>,
 }
 
 impl Command {
@@ -51,7 +51,7 @@ async fn by_symbol(
 )
     -> anyhow::Result<()>
 {
-    let exclude = cmd.exclude_section
+    let filter = cmd.filter_section
         .as_ref()
         .map(|rule| regex::Regex::new(rule))
         .transpose()?;
@@ -59,14 +59,14 @@ async fn by_symbol(
 
     for (mangled_name, &idx) in explorer.cache.sym2idx(&explorer.obj) {
         // filter section by regex
-        if let Some(rule) = exclude.as_ref() {
+        if let Some(rule) = filter.as_ref() {
             let sym = explorer.obj.symbol_by_index(idx)?;
             let Some(section_idx) = sym.section_index()
                 else { continue };
             let section = explorer.obj.section_by_index(section_idx)?;
 
             if let Ok(section_name) = section.name() {
-                if rule.is_match(section_name) {
+                if !rule.is_match(section_name) {
                     continue
                 }
             }
@@ -109,7 +109,7 @@ async fn by_data(
 )
     -> anyhow::Result<()>
 {
-    let exclude = cmd.exclude_section
+    let filter = cmd.filter_section
         .as_ref()
         .map(|rule| regex::Regex::new(rule))
         .transpose()?;
@@ -118,9 +118,9 @@ async fn by_data(
         .filter(|section| is_data_section(section.kind()))
     {
         // filter section by regex
-        if let Some(rule) = exclude.as_ref() {
+        if let Some(rule) = filter.as_ref() {
             if let Ok(section_name) = section.name() {
-                if rule.is_match(section_name) {
+                if !rule.is_match(section_name) {
                     continue
                 }
             }
