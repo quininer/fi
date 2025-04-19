@@ -178,11 +178,10 @@ async fn show_text(
 
     impl fmt::Display for InstPrinter<'_> {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            if let Some(mnemonic) = self.0.mnemonic() {
-                write!(f, "{} ", mnemonic)?;
-                if let Some(op_str) = self.0.op_str() {
-                    write!(f, "{}", op_str)?;
-                }
+            write!(f, "{}", self.0.mnemonic().unwrap_or("???"))?;
+
+            if let Some(op_str) = self.0.op_str() {
+                write!(f, " {}", op_str)?;
             }
 
             Ok(())
@@ -220,7 +219,7 @@ async fn show_text(
     for inst in insts.as_ref() {
         writeln!(
             stdio.stdout,
-            "0x{:016p}  {}  {}",
+            "{:018p}  {}  {}",
             inst.address() as *const (),
             HexPrinter(inst.bytes(), 8),
             InstPrinter(&inst)
@@ -257,7 +256,7 @@ async fn show_data(
         
         writeln!(
             stdio.stdout,
-            "0x{:016p}  {} {}",
+            "{:018p}  {} {}",
             addr as *const u8,
             HexPrinter(chunk, width),
             AsciiPrinter(chunk)
