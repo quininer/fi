@@ -37,8 +37,8 @@ fn main() -> anyhow::Result<()> {
         .context("not found project dirs")?;
 
     match options.command {
-        Commands::Listen(cmd) => cmd.exec(dir),
-        _ => call::call(dir, Box::new(options))
+        Commands::Listen(cmd) => cmd.exec(&dir),
+        _ => call::call(&dir, Box::new(options))
     }
 }
 

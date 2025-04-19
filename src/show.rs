@@ -1,3 +1,5 @@
+use std::io::Write;
+
 use anyhow::Context;
 use clap::Args;
 use object::{ Object, ObjectSection, ObjectSymbol, SymbolKind };
@@ -19,8 +21,12 @@ pub struct Command {
     length: Option<u64>,
 
     /// no search symbol
-    #[arg(short, long, default_value_t = false)]
+    #[arg(long, default_value_t = false)]
     no_symbol: bool,
+
+    /// dump raw data
+    #[arg(long, default_value_t = false)]
+    dump: bool,
 
     /// address align
     #[arg(long)]
@@ -86,7 +92,9 @@ async fn by_symbol(
 
     let data = &data[offset..][..size];
 
-    if matches!(sym.kind(), SymbolKind::Text) {
+    if cmd.dump {
+        dump_data(data, stdio)?;
+    } else if matches!(sym.kind(), SymbolKind::Text) {
         show_text(
             cmd,
             explorer,
@@ -95,7 +103,7 @@ async fn by_symbol(
             sym.address(),
             data,
             stdio
-        );
+        )?;
     } else {
         show_data(
             cmd,
@@ -105,7 +113,7 @@ async fn by_symbol(
             sym.address(),
             data,
             stdio
-        );        
+        )?;        
     }
     
     Ok(())
@@ -132,20 +140,24 @@ async fn by_section(
 
     // TODO addr align
 
-    let offset = (section.address() - addr) as usize;
+    let offset = (addr - section.address()) as usize;
     let len = cmd.length.unwrap_or(256) as usize;
     let len = std::cmp::min(len, data.len() - offset);
     let data = &data[offset..][..len];
 
-    show_data(
-        cmd,
-        explorer,
-        section.name().ok(),
-        None,
-        0, // align
-        data,
-        stdio
-    );
+    if cmd.dump {
+        dump_data(data, stdio)?;
+    } else {
+        show_data(
+            cmd,
+            explorer,
+            section.name().ok(),
+            None,
+            0, // align
+            data,
+            stdio
+        )?;
+    }
              
     Ok(())
 }
@@ -158,8 +170,10 @@ fn show_text(
     start: u64,
     data: &[u8],
     stdio: &mut Stdio    
-) {
+) -> anyhow::Result<()> {
     //
+    
+    Ok(())
 }
 
 fn show_data(
@@ -170,6 +184,14 @@ fn show_data(
     start: u64,
     data: &[u8],
     stdio: &mut Stdio    
-) {
+) -> anyhow::Result<()> {
     //
+    
+    Ok(())
+}
+
+fn dump_data(data: &[u8], stdio: &mut Stdio) -> anyhow::Result<()> {
+    stdio.stdout.write_all(data)?;
+
+    Ok(())
 }

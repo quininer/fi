@@ -21,7 +21,7 @@ pub struct Command {
 }
 
 impl Command {
-    pub fn exec(self, dir: ProjectDirs) -> anyhow::Result<()> {
+    pub fn exec(self, dir: &ProjectDirs) -> anyhow::Result<()> {
         let ipc_path = if let Some(ipc_path) = env::var_os(SESSION_ENVNAME) {
             PathBuf::from(ipc_path)
         } else {
