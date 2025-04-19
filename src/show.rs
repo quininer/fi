@@ -86,7 +86,7 @@ async fn by_symbol(
     let section_idx = sym.section_index().context("not found section index")?;
     let section = explorer.obj.section_by_index(section_idx)?;
 
-    let data = section.uncompressed_data()?;
+    let data = explorer.cache.data(&explorer.obj, section_idx).await?;
     let offset = (sym.address() - section.address()) as usize;
     let size = sym.size() as usize;
 
@@ -136,7 +136,7 @@ async fn by_section(
         .context("not found section")?;
 
     let align = cmd.align.unwrap_or_else(|| section.align());
-    let data = section.uncompressed_data()?;
+    let data = explorer.cache.data(&explorer.obj, section.index()).await?;
 
     // TODO addr align
 

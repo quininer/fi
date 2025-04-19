@@ -1,9 +1,12 @@
-use std::fs;
+use std::{ fs, ops };
 use std::path::Path;
+use std::borrow::Cow;
 use std::sync::OnceLock;
-use tokio::sync::OnceCell;
+use std::collections::HashMap;
+use tokio::sync::{ OnceCell, RwLock, RwLockReadGuard };
 use memmap2::{ MmapOptions, Mmap };
 use object::{ Object, ObjectSymbol, ObjectSection };
+use object::read::{ SectionIndex, SymbolIndex };
 use indexmap::IndexMap;
 
 
@@ -15,7 +18,14 @@ pub struct Explorer {
 #[derive(Default)]
 pub struct Cache {
     pub addr2sym: OnceCell<object::read::SymbolMap<object::read::SymbolMapName<'static>>>,
-    pub sym2idx: OnceCell<IndexMap<&'static str, object::read::SymbolIndex>>,
+    pub sym2idx: OnceCell<IndexMap<&'static str, SymbolIndex>>,
+    pub data: DataCache
+}
+
+#[derive(Default)]
+struct DataCache {
+    data: RwLock<Vec<Cow<'static, [u8]>>>,
+    map: RwLock<HashMap<SectionIndex, usize>>,
 }
 
 static TARGET: OnceLock<(fs::File, Mmap)> = OnceLock::new();
@@ -35,7 +45,7 @@ impl Explorer {
         })
     }
 
-    pub fn symbol_kind(&self, idx: object::read::SymbolIndex) -> char {
+    pub fn symbol_kind(&self, idx: SymbolIndex) -> char {
         use object::{ SymbolSection, SectionKind };
 
         let sym = self.obj.symbol_by_index(idx).unwrap();
@@ -73,7 +83,7 @@ impl Cache {
     }
 
     pub async fn sym2idx<'a>(&'a self, obj: &object::File<'static>)
-        -> &'a IndexMap<&'static str, object::read::SymbolIndex>
+        -> &'a IndexMap<&'static str, SymbolIndex>
     {
         self.sym2idx.get_or_init(async || {
             let mut map = IndexMap::new();
@@ -90,5 +100,48 @@ impl Cache {
             map.shrink_to_fit();
             map
         }).await
+    }
+
+    pub async fn data<'a>(&'a self, obj: &object::File<'static>, idx: SectionIndex)
+        -> anyhow::Result<impl ops::Deref<Target = [u8]> + 'a>
+    {
+        // fast check
+        {
+            let map = self.data.map.read().await;
+            if let Some(id) = map.get(&idx).copied() {
+                let list = self.data.data.read().await;
+                return Ok(RwLockReadGuard::map(list, move |list| &*list[id]));
+            }
+        }
+
+        // insert
+        let id = {
+            let mut map = self.data.map.write().await;
+
+            // double check
+            if map.get(&idx).is_none() {
+                let section = obj.section_by_index(idx)?;
+                let data = section.uncompressed_data()?;
+                
+                let mut list = self.data.data.write().await;
+                let id = list.len();
+                list.push(data);
+                map.insert(idx, id);
+
+                Some(id)
+            } else {
+                None
+            }
+        };
+
+        let id = if let Some(id) = id {
+            id
+        } else {
+            let map = self.data.map.read().await;
+            map.get(&idx).copied().unwrap()
+        };
+
+        let list = self.data.data.read().await;
+        Ok(RwLockReadGuard::map(list, move |list| &*list[id]))
     }
 }

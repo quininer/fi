@@ -133,10 +133,10 @@ async fn by_data(
         }
 
         // TODO less alloc
-        if let Ok(data) = section.uncompressed_data() {
+        if let Ok(data) = explorer.cache.data(&explorer.obj, section.index()).await {
             let base = section.address();
             
-            for mat in ac.find_iter(&data) {
+            for mat in ac.find_iter(&*data) {
                 let addr = base + mat.start() as u64;
 
                 writeln!(
