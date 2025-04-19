@@ -82,3 +82,17 @@ pub fn is_data_section(kind: object::read::SectionKind) -> bool {
             | SectionKind::Note
     )    
 }
+
+#[derive(Default)]
+pub struct YieldPoint(u8);
+
+impl YieldPoint {
+    pub async fn yield_now(&mut self) {
+        if self.0 == u8::MAX {
+            self.0 = 0;
+            tokio::task::yield_now().await
+        } else {
+            self.0 += 1;
+        }
+    }
+}

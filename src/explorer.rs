@@ -1,8 +1,9 @@
 use std::fs;
 use std::path::Path;
 use std::sync::OnceLock;
+use tokio::sync::OnceCell;
 use memmap2::{ MmapOptions, Mmap };
-use object::{ Object, ObjectSymbol, ObjectSection, SectionKind };
+use object::{ Object, ObjectSymbol, ObjectSection };
 use indexmap::IndexMap;
 
 
@@ -13,11 +14,11 @@ pub struct Explorer {
 
 #[derive(Default)]
 pub struct Cache {
-    pub addr2sym: OnceLock<object::read::SymbolMap<object::read::SymbolMapName<'static>>>,
-    pub sym2idx: OnceLock<IndexMap<&'static str, object::read::SymbolIndex>>,
+    pub addr2sym: OnceCell<object::read::SymbolMap<object::read::SymbolMapName<'static>>>,
+    pub sym2idx: OnceCell<IndexMap<&'static str, object::read::SymbolIndex>>,
 }
 
-static TARGET: OnceLock<Mmap> = OnceLock::new();
+static TARGET: OnceLock<(fs::File, Mmap)> = OnceLock::new();
 
 impl Explorer {
     pub fn open(path: &Path) -> anyhow::Result<Explorer> {
@@ -25,7 +26,7 @@ impl Explorer {
         let mmap = unsafe {
             MmapOptions::new().map_copy_read_only(&fd)?
         };
-        let mmap = TARGET.get_or_init(move || mmap);
+        let (_, mmap) = TARGET.get_or_init(move || (fd, mmap));
         let obj = object::File::parse(mmap.as_ref())?;
 
         Ok(Explorer {
@@ -33,7 +34,6 @@ impl Explorer {
             cache: Cache::default(),
         })
     }
-
 
     pub fn symbol_kind(&self, idx: object::read::SymbolIndex) -> char {
         use object::{ SymbolSection, SectionKind };
@@ -66,22 +66,22 @@ impl Explorer {
 }
 
 impl Cache {
-    pub fn addr2sym<'a>(&'a self, obj: &object::File<'static>)
+    pub async fn addr2sym<'a>(&'a self, obj: &object::File<'static>)
         -> &'a object::read::SymbolMap<object::read::SymbolMapName<'static>>
     {
-        self.addr2sym.get_or_init(|| obj.symbol_map())
+        self.addr2sym.get_or_init(async || obj.symbol_map()).await
     }
 
-    pub fn sym2idx<'a>(&'a self, obj: &object::File<'static>)
+    pub async fn sym2idx<'a>(&'a self, obj: &object::File<'static>)
         -> &'a IndexMap<&'static str, object::read::SymbolIndex>
     {
-        self.sym2idx.get_or_init(|| {
+        self.sym2idx.get_or_init(async || {
             let mut map = IndexMap::new();
             for sym in obj.symbols() {
                 let sym_name = match sym.name() {
                     Ok(name) => name,
-                    Err(_err) => {
-                        // TODO warn
+                    Err(err) => {
+                        eprintln!("bad symbol name: {:?}", err);
                         continue
                     }
                 };
@@ -89,6 +89,6 @@ impl Cache {
             }
             map.shrink_to_fit();
             map
-        })
+        }).await
     }
 }

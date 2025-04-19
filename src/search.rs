@@ -3,10 +3,10 @@ use clap::Args;
 use serde::{ Serialize, Deserialize };
 use aho_corasick::AhoCorasick;
 use bstr::ByteSlice;
-use object::{ Object, ObjectSection, ObjectSymbol, SectionKind };
+use object::{ Object, ObjectSection, ObjectSymbol };
 use symbolic_demangle::demangle;
 use crate::explorer::Explorer;
-use crate::util::{ Stdio, is_data_section };
+use crate::util::{ Stdio, YieldPoint, is_data_section };
 
 
 /// search symbol name and data
@@ -56,8 +56,11 @@ async fn by_symbol(
         .map(|rule| regex::Regex::new(rule))
         .transpose()?;
     let mut outbuf = Vec::new();
+    let mut point = YieldPoint::default();
 
-    for (mangled_name, &idx) in explorer.cache.sym2idx(&explorer.obj) {
+    for (mangled_name, &idx) in explorer.cache.sym2idx(&explorer.obj).await {
+        point.yield_now().await;
+        
         // filter section by regex
         if let Some(rule) = filter.as_ref() {
             let sym = explorer.obj.symbol_by_index(idx)?;
@@ -113,10 +116,13 @@ async fn by_data(
         .as_ref()
         .map(|rule| regex::Regex::new(rule))
         .transpose()?;
+    let mut point = YieldPoint::default();
     
     for section in explorer.obj.sections()
         .filter(|section| is_data_section(section.kind()))
     {
+        point.yield_now().await;
+
         // filter section by regex
         if let Some(rule) = filter.as_ref() {
             if let Ok(section_name) = section.name() {

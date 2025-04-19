@@ -3,7 +3,7 @@ use clap::Args;
 use object::{ Object, ObjectSection, ObjectSymbol, SymbolKind };
 use serde::{ Serialize, Deserialize };
 use crate::explorer::Explorer;
-use crate::util::{ is_data_section, u64ptr, Stdio };
+use crate::util::{ u64ptr, Stdio };
 
 /// search symbol name and data
 #[derive(Serialize, Deserialize)]
@@ -32,14 +32,14 @@ impl Command {
         let addr = u64ptr(&self.address)?;
 
         if !self.no_symbol && explorer.obj.has_debug_symbols() {
-            by_symbol(&self, explorer, addr, stdio)
+            by_symbol(&self, explorer, addr, stdio).await
         } else {
-            by_section(&self, explorer, addr, stdio)
+            by_section(&self, explorer, addr, stdio).await
         }
     }
 }
 
-fn by_symbol(
+async fn by_symbol(
     cmd: &Command,
     explorer: &Explorer,
     addr: u64,
@@ -47,13 +47,14 @@ fn by_symbol(
 )
     -> anyhow::Result<()>
 {
-    let map = explorer.cache.addr2sym(&explorer.obj);
+    let map = explorer.cache.addr2sym(&explorer.obj).await;
     let map = map.symbols();
     let (idx, sym_idx)= match map.binary_search_by_key(&addr, |sym| sym.address()) {
         Ok(idx) => (idx, None),
         Err(idx) => {
             let sym = map.get(idx).context("no available symbols found")?;
-            let &sym_idx = explorer.cache.sym2idx(&explorer.obj).get(sym.name())
+            let &sym_idx = explorer.cache.sym2idx(&explorer.obj).await
+                .get(sym.name())
                 .context("not found symbol")?;
             let sym = explorer.obj.symbol_by_index(sym_idx)?;
             let start = sym.address();
@@ -70,7 +71,7 @@ fn by_symbol(
     let sym_idx = if let Some(sym_idx) = sym_idx {
         sym_idx
     } else {
-        explorer.cache.sym2idx(&explorer.obj)
+        explorer.cache.sym2idx(&explorer.obj).await
             .get(map[idx].name())
             .copied()
             .context("not found symbol")?
@@ -110,7 +111,7 @@ fn by_symbol(
     Ok(())
 }
 
-fn by_section(
+async fn by_section(
     cmd: &Command,
     explorer: &Explorer,
     addr: u64,

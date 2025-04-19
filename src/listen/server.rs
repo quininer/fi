@@ -3,7 +3,7 @@ use std::io::Write;
 use std::sync::Arc;
 use std::path::Path;
 use std::os::fd::FromRawFd;
-use tokio::io::{ AsyncReadExt, AsyncWriteExt };
+use tokio::io::{ self, AsyncReadExt, AsyncWriteExt };
 use tokio::net::{ UnixListener, UnixStream };
 use crate::call::{ Start, Exit, ExitCode };
 use crate::explorer::Explorer;
@@ -46,8 +46,9 @@ async fn exec(
     stream.read_exact(&mut buf).await?;
 
     let start: Start = cbor4ii::serde::from_slice(&buf)?;
+    let pid = stream.peer_cred()?.pid();
 
-    println!("{:?} {:?}", stream.peer_cred()?.pid(), &start.options);
+    println!("{:?} {:?}", pid, &start.options);
 
     let stdin = recv_fd(&stream).await?;
     let stdout = recv_fd(&stream).await?;
@@ -59,14 +60,22 @@ async fn exec(
             stderr: File::from_raw_fd(stderr)
         }
     };
+    let mut sink = io::sink();
 
-    let code = match start.options.command.exec(explorer, &mut stdio).await {
-        Ok(()) => ExitCode::Ok,
-        Err(err) => {
-            writeln!(stdio.stderr, "exec failed: {:?}", err)?;
-            ExitCode::Failure
+    let code = tokio::select! {
+        result = start.options.command.exec(explorer, &mut stdio) => match result {
+            Ok(()) => ExitCode::Ok,
+            Err(err) => {
+                writeln!(stdio.stderr, "exec failed: {:?}", err)?;
+                ExitCode::Failure
+            }
+        },
+        _ = io::copy(&mut stream, &mut sink) => {
+            eprintln!("{:?} command cancel", pid);
+            return Ok(())
         }
     };
+
     let exit = Exit { code };
     let buf = cbor4ii::serde::to_vec(Vec::new(), &exit)?;
     let len: u16 = buf.len().try_into()?;
