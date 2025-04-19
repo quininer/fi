@@ -5,7 +5,7 @@ use clap::Args;
 use object::{ Object, ObjectSection, ObjectSymbol, SymbolKind };
 use serde::{ Serialize, Deserialize };
 use crate::explorer::Explorer;
-use crate::util::{ u64ptr, Stdio };
+use crate::util::{ u64ptr, Stdio, YieldPoint };
 
 /// search symbol name and data
 #[derive(Serialize, Deserialize)]
@@ -107,8 +107,6 @@ async fn by_symbol(
         )?;
     } else {
         show_data(
-            cmd,
-            explorer,
             section.name().ok(),
             Some(map[idx].name()),
             sym.address(),
@@ -155,11 +153,9 @@ async fn by_section(
         dump_data(data, stdio)?;
     } else {
         show_data(
-            cmd,
-            explorer,
             section.name().ok(),
             None,
-            0, // align
+            addr,
             data,
             stdio
         )?;
@@ -183,21 +179,74 @@ fn show_text(
 }
 
 fn show_data(
-    cmd: &Command,
-    explorer: &Explorer,
     section_name: Option<&str>,
     symbol_name: Option<&str>,
     start: u64,
     data: &[u8],
     stdio: &mut Stdio    
 ) -> anyhow::Result<()> {
-    //
+    use std::fmt;
+
+    struct HexPrinter<'a>(&'a [u8]);
+    struct AsciiPrinter<'a>(&'a [u8]);
+
+    impl fmt::Display for HexPrinter<'_> {
+        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            for &b in self.0.iter() {
+                write!(f, "{:02x} ", b)?;
+            }
+
+            for _ in self.0.len()..16 {
+                write!(f, "   ")?;
+            }
+
+            Ok(())
+        }
+    }
+
+    impl fmt::Display for AsciiPrinter<'_> {
+        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            use std::fmt::Write;
+
+            for &b in self.0.iter() {
+                let c = b as char;
+                let c = if c.is_ascii_graphic() {
+                    c
+                } else {
+                    '.'
+                };
+                f.write_char(c)?;
+            }
+
+            Ok(())
+        }
+    }
+    
+    if let Some(name) = section_name {
+        writeln!(stdio.stdout, "section: {}", name)?;
+    }
+
+    if let Some(name) = symbol_name {
+        writeln!(stdio.stdout, "symbol: {}", name)?;
+    }
+
+    let addr = start;
+
+    for (offset, chunk) in data.chunks(16).enumerate() {
+        let addr = addr.wrapping_add(offset as u64 * 16);
+        
+        writeln!(
+            stdio.stdout,
+            "0x{:016p}  {} {}",
+            addr as *const u8,
+            HexPrinter(chunk),
+            AsciiPrinter(chunk)
+        )?;
+    }
     
     Ok(())
 }
 
 fn dump_data(data: &[u8], stdio: &mut Stdio) -> anyhow::Result<()> {
-    stdio.stdout.write_all(data)?;
-
-    Ok(())
+    stdio.stdout.write_all(data).map_err(Into::into)
 }

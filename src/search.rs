@@ -121,8 +121,6 @@ async fn by_data(
     for section in explorer.obj.sections()
         .filter(|section| is_data_section(section.kind()))
     {
-        point.yield_now().await;
-
         // filter section by regex
         if let Some(rule) = filter.as_ref() {
             if let Ok(section_name) = section.name() {
@@ -138,6 +136,7 @@ async fn by_data(
             
             for mat in ac.find_iter(&*data) {
                 let addr = base + mat.start() as u64;
+                point.yield_now().await;
 
                 writeln!(
                     &mut stdio.stdout,
