@@ -35,10 +35,9 @@ impl Command {
     pub async fn exec(self, explorer: &Explorer, stdio: &mut Stdio) -> anyhow::Result<()> {
         let ac = AhoCorasick::new(&self.keywords)?;
 
-        match (explorer.obj.has_debug_symbols(), self.data) {
-            (true, false) => by_symbol(&self, &ac, explorer, stdio).await,
-            (false, false) => anyhow::bail!("no debug symbols"),
-            (_, true) => by_data(&self, &ac, explorer, stdio).await
+        match self.data {
+            false => by_symbol(&self, &ac, explorer, stdio).await,
+            true => by_data(&self, &ac, explorer, stdio).await
         }
     }
 }

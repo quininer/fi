@@ -1,4 +1,4 @@
-use std::io;
+use std::{ io, fmt };
 use std::fs::File;
 use std::path::Path;
 use std::os::fd::RawFd;
@@ -94,5 +94,42 @@ impl YieldPoint {
         } else {
             self.0 += 1;
         }
+    }
+}
+
+pub struct HexPrinter<'a>(pub &'a [u8], pub usize);
+pub struct AsciiPrinter<'a>(pub &'a [u8]);
+
+impl fmt::Display for HexPrinter<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        debug_assert!(self.0.len() <= self.1);
+        
+        for &b in self.0.iter().take(self.1) {
+            write!(f, "{:02x} ", b)?;
+        }
+
+        for _ in self.0.len()..self.1 {
+            write!(f, "   ")?;
+        }
+
+        Ok(())
+    }
+}
+
+impl fmt::Display for AsciiPrinter<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use std::fmt::Write;
+
+        for &b in self.0.iter() {
+            let c = b as char;
+            let c = if c.is_ascii_graphic() {
+                c
+            } else {
+                '.'
+            };
+            f.write_char(c)?;
+        }
+
+        Ok(())
     }
 }

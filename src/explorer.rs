@@ -23,7 +23,7 @@ pub struct Cache {
 }
 
 #[derive(Default)]
-struct DataCache {
+pub struct DataCache {
     data: RwLock<Vec<Cow<'static, [u8]>>>,
     map: RwLock<HashMap<SectionIndex, usize>>,
 }

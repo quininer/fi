@@ -1,11 +1,11 @@
 use std::io::Write;
-
 use anyhow::Context;
+use capstone::arch::BuildsCapstone;
 use clap::Args;
-use object::{ Object, ObjectSection, ObjectSymbol, SymbolKind };
+use object::{ Object, ObjectSection, ObjectSymbol, SymbolKind, SymbolIndex, SectionIndex };
 use serde::{ Serialize, Deserialize };
 use crate::explorer::Explorer;
-use crate::util::{ u64ptr, Stdio, YieldPoint };
+use crate::util::{ u64ptr, Stdio, HexPrinter, AsciiPrinter, YieldPoint };
 
 /// search symbol name and data
 #[derive(Serialize, Deserialize)]
@@ -37,7 +37,7 @@ impl Command {
     pub async fn exec(self, explorer: &Explorer, stdio: &mut Stdio) -> anyhow::Result<()> {
         let addr = u64ptr(&self.address)?;
 
-        if !self.no_symbol && explorer.obj.has_debug_symbols() {
+        if !self.no_symbol {
             by_symbol(&self, explorer, addr, stdio).await
         } else {
             by_section(&self, explorer, addr, stdio).await
@@ -94,17 +94,16 @@ async fn by_symbol(
     let data = &data[offset..][..size];
 
     if cmd.dump {
-        dump_data(data, stdio)?;
+        dump_data(data, stdio).await?;
     } else if matches!(sym.kind(), SymbolKind::Text) {
         show_text(
             cmd,
             explorer,
-            section.name().ok(),
-            map[idx].name(),
-            sym.address(),
+            section_idx,
+            sym.index(),
             data,
             stdio
-        )?;
+        ).await?;
     } else {
         show_data(
             section.name().ok(),
@@ -112,7 +111,7 @@ async fn by_symbol(
             sym.address(),
             data,
             stdio
-        )?;        
+        ).await?;        
     }
     
     Ok(())
@@ -150,7 +149,7 @@ async fn by_section(
     let data = &data[offset..][..len];
 
     if cmd.dump {
-        dump_data(data, stdio)?;
+        dump_data(data, stdio).await?;
     } else {
         show_data(
             section.name().ok(),
@@ -158,70 +157,88 @@ async fn by_section(
             addr,
             data,
             stdio
-        )?;
+        ).await?;
     }
              
     Ok(())
 }
 
-fn show_text(
-    cmd: &Command,
+async fn show_text(
+    _cmd: &Command,
     explorer: &Explorer,
-    section_name: Option<&str>,
-    symbol_name: &str,
-    start: u64,
+    section_idx: SectionIndex,
+    symbol_idx: SymbolIndex,
     data: &[u8],
     stdio: &mut Stdio    
 ) -> anyhow::Result<()> {
-    //
+    use std::fmt;
+    use capstone::Capstone;
+
+    struct InstPrinter<'a>(&'a capstone::Insn<'a>);
+
+    impl fmt::Display for InstPrinter<'_> {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            if let Some(mnemonic) = self.0.mnemonic() {
+                write!(f, "{} ", mnemonic)?;
+                if let Some(op_str) = self.0.op_str() {
+                    write!(f, "{}", op_str)?;
+                }
+            }
+
+            Ok(())
+        }
+    }
+    
+    let section = explorer.obj.section_by_index(section_idx)?;
+    let symbol = explorer.obj.symbol_by_index(symbol_idx)?;
+
+    let disasm = match explorer.obj.architecture() {
+        object::Architecture::X86_64 => Capstone::new()
+            .x86()
+            .mode(capstone::arch::x86::ArchMode::Mode64)
+            .build()?,
+        object::Architecture::Aarch64 => Capstone::new()
+            .arm64()
+            .build()?,
+        object::Architecture::Riscv64 => Capstone::new()
+            .riscv()
+            .mode(capstone::arch::riscv::ArchMode::RiscV64)
+            .build()?,
+        arch => anyhow::bail!("unsupported arch: {:?}", arch)
+    };
+
+    if let Ok(name) = section.name() {
+        writeln!(stdio.stdout, "section: {}", name)?;
+    }
+
+    if let Ok(name) = symbol.name() {
+        writeln!(stdio.stdout, "symbol: {}", name)?;
+    }
+
+    let insts = disasm.disasm_all(data, symbol.address())?;
+
+    for inst in insts.as_ref() {
+        writeln!(
+            stdio.stdout,
+            "0x{:016p}  {}  {}",
+            inst.address() as *const (),
+            HexPrinter(inst.bytes(), 8),
+            InstPrinter(&inst)
+        )?;
+    }
+
+    // TODO
     
     Ok(())
 }
 
-fn show_data(
+async fn show_data(
     section_name: Option<&str>,
     symbol_name: Option<&str>,
     start: u64,
     data: &[u8],
     stdio: &mut Stdio    
 ) -> anyhow::Result<()> {
-    use std::fmt;
-
-    struct HexPrinter<'a>(&'a [u8]);
-    struct AsciiPrinter<'a>(&'a [u8]);
-
-    impl fmt::Display for HexPrinter<'_> {
-        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-            for &b in self.0.iter() {
-                write!(f, "{:02x} ", b)?;
-            }
-
-            for _ in self.0.len()..16 {
-                write!(f, "   ")?;
-            }
-
-            Ok(())
-        }
-    }
-
-    impl fmt::Display for AsciiPrinter<'_> {
-        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-            use std::fmt::Write;
-
-            for &b in self.0.iter() {
-                let c = b as char;
-                let c = if c.is_ascii_graphic() {
-                    c
-                } else {
-                    '.'
-                };
-                f.write_char(c)?;
-            }
-
-            Ok(())
-        }
-    }
-    
     if let Some(name) = section_name {
         writeln!(stdio.stdout, "section: {}", name)?;
     }
@@ -231,15 +248,18 @@ fn show_data(
     }
 
     let addr = start;
+    let width = 16;
+    let mut point = YieldPoint::default();
 
-    for (offset, chunk) in data.chunks(16).enumerate() {
-        let addr = addr.wrapping_add(offset as u64 * 16);
+    for (offset, chunk) in data.chunks(width).enumerate() {
+        let addr = addr.wrapping_add((offset * width) as u64);
+        point.yield_now().await;
         
         writeln!(
             stdio.stdout,
             "0x{:016p}  {} {}",
             addr as *const u8,
-            HexPrinter(chunk),
+            HexPrinter(chunk, width),
             AsciiPrinter(chunk)
         )?;
     }
@@ -247,6 +267,13 @@ fn show_data(
     Ok(())
 }
 
-fn dump_data(data: &[u8], stdio: &mut Stdio) -> anyhow::Result<()> {
-    stdio.stdout.write_all(data).map_err(Into::into)
+async fn dump_data(data: &[u8], stdio: &mut Stdio) -> anyhow::Result<()> {
+    let mut point = YieldPoint::default();
+    
+    for chunk in data.chunks(4 * 1024) {
+        stdio.stdout.write_all(chunk)?;
+        point.yield_now().await;
+    }
+
+    Ok(())
 }
