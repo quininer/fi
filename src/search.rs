@@ -129,7 +129,6 @@ async fn by_data(
             }
         }
 
-        // TODO less alloc
         if let Ok(data) = explorer.cache.data(&explorer.obj, section.index()).await {
             let base = section.address();
             

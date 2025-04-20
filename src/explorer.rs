@@ -1,9 +1,9 @@
-use std::{ fs, ops };
+use std::fs;
 use std::path::Path;
 use std::borrow::Cow;
-use std::sync::OnceLock;
+use std::sync::{ Arc, OnceLock };
 use std::collections::HashMap;
-use tokio::sync::{ OnceCell, RwLock, RwLockReadGuard };
+use tokio::sync::{ OnceCell, RwLock };
 use memmap2::{ MmapOptions, Mmap };
 use object::{ Object, ObjectSymbol, ObjectSection };
 use object::read::{ SectionIndex, SymbolIndex };
@@ -19,12 +19,13 @@ pub struct Explorer {
 pub struct Cache {
     pub addr2sym: OnceCell<object::read::SymbolMap<object::read::SymbolMapName<'static>>>,
     pub sym2idx: OnceCell<IndexMap<&'static str, SymbolIndex>>,
+    pub dyn_rela: OnceCell<Box<[(u64, object::read::Relocation)]>>,
     pub data: DataCache
 }
 
 #[derive(Default)]
 pub struct DataCache {
-    data: RwLock<Vec<Cow<'static, [u8]>>>,
+    data: RwLock<Vec<Arc<Cow<'static, [u8]>>>>,
     map: RwLock<HashMap<SectionIndex, usize>>,
 }
 
@@ -102,15 +103,29 @@ impl Cache {
         }).await
     }
 
+    pub async fn dyn_rela<'a>(&'a self, obj: &object::File<'static>)
+        -> &'a [(u64, object::read::Relocation)]
+    {
+        self.dyn_rela.get_or_init(async || {
+            let mut list = obj.dynamic_relocations()
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>();
+            list.sort_by_key(|(addr, _)| *addr);
+            list.into_boxed_slice()
+        })
+            .await
+    }
+
     pub async fn data<'a>(&'a self, obj: &object::File<'static>, idx: SectionIndex)
-        -> anyhow::Result<impl ops::Deref<Target = [u8]> + 'a>
+        -> anyhow::Result<Arc<Cow<'static, [u8]>>>
     {
         // fast check
         {
             let map = self.data.map.read().await;
             if let Some(id) = map.get(&idx).copied() {
                 let list = self.data.data.read().await;
-                return Ok(RwLockReadGuard::map(list, move |list| &*list[id]));
+                return Ok(list[id].clone());
             }
         }
 
@@ -125,7 +140,7 @@ impl Cache {
                 
                 let mut list = self.data.data.write().await;
                 let id = list.len();
-                list.push(data);
+                list.push(Arc::new(data));
                 map.insert(idx, id);
 
                 Some(id)
@@ -142,6 +157,6 @@ impl Cache {
         };
 
         let list = self.data.data.read().await;
-        Ok(RwLockReadGuard::map(list, move |list| &*list[id]))
+        Ok(list[id].clone())
     }
 }

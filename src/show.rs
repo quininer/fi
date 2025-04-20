@@ -1,8 +1,8 @@
 use std::io::Write;
 use anyhow::Context;
-use capstone::arch::BuildsCapstone;
+use capstone::arch::{ BuildsCapstone, DetailsArchInsn };
 use clap::Args;
-use object::{ Object, ObjectSection, ObjectSymbol, SymbolKind, SymbolIndex, SectionIndex };
+use object::{ Object, ObjectSection, ObjectSymbol, SymbolKind, SymbolIndex, SectionIndex, SymbolMap, SymbolMapName };
 use serde::{ Serialize, Deserialize };
 use crate::explorer::Explorer;
 use crate::util::{ u64ptr, Stdio, HexPrinter, AsciiPrinter, YieldPoint };
@@ -187,24 +187,55 @@ async fn show_text(
             Ok(())
         }
     }
+
+    struct RelaPrinter<'a> {
+        explorer: &'a Explorer,
+        disasm: &'a Capstone,
+        addr2sym: &'a SymbolMap<SymbolMapName<'static>>,
+        dyn_rela: &'a [(u64, object::read::Relocation)],
+        inst: &'a capstone::Insn<'a>,
+    }
+
+    impl fmt::Display for RelaPrinter<'_> {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            if let Some(addr) = operand2addr(self.disasm, self.addr2sym, self.inst) {
+                if let Ok(Some(name)) = query_symbol_by_addr(
+                    self.explorer,
+                    self.addr2sym,
+                    self.dyn_rela,
+                    addr
+                ) {
+                    write!(f, "\t# {}", name)?;
+                }
+            }
+
+            Ok(())            
+        }
+    }
     
     let section = explorer.obj.section_by_index(section_idx)?;
     let symbol = explorer.obj.symbol_by_index(symbol_idx)?;
+    let addr2sym = explorer.cache.addr2sym(&explorer.obj).await;
+    let dyn_rela = explorer.cache.dyn_rela(&explorer.obj).await;
 
     let disasm = match explorer.obj.architecture() {
         object::Architecture::X86_64 => Capstone::new()
             .x86()
             .mode(capstone::arch::x86::ArchMode::Mode64)
+            .detail(true)
             .build()?,
         object::Architecture::Aarch64 => Capstone::new()
             .arm64()
+            .detail(true)
             .build()?,
         object::Architecture::Riscv64 => Capstone::new()
             .riscv()
             .mode(capstone::arch::riscv::ArchMode::RiscV64)
+            .detail(true)
             .build()?,
         arch => anyhow::bail!("unsupported arch: {:?}", arch)
     };
+    let disasm = &disasm;
 
     if let Ok(name) = section.name() {
         writeln!(stdio.stdout, "section: {}", name)?;
@@ -215,18 +246,22 @@ async fn show_text(
     }
 
     let insts = disasm.disasm_all(data, symbol.address())?;
-
     for inst in insts.as_ref() {
+        let rela = RelaPrinter {
+            explorer, disasm, addr2sym, dyn_rela, inst
+        };
+        
         writeln!(
             stdio.stdout,
-            "{:018p}  {}  {}",
+            "{:018p}  {}  {}{}",
             inst.address() as *const (),
             HexPrinter(inst.bytes(), 8),
-            InstPrinter(&inst)
+            InstPrinter(&inst),
+            rela
         )?;
-    }
 
-    // TODO
+        // TODO show debuginfo
+    }
     
     Ok(())
 }
@@ -275,4 +310,97 @@ async fn dump_data(data: &[u8], stdio: &mut Stdio) -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+fn operand2addr<'a>(
+    disasm: &capstone::Capstone,
+    addr2sym: &SymbolMap<SymbolMapName<'_>>,
+    inst: &'a capstone::Insn<'_>,
+)
+    -> Option<u64>
+{
+    use capstone::arch::ArchDetail;
+    use capstone::arch::x86::X86OperandType;
+    use capstone::arch::x86::X86Reg::{ Type as X86RegType, X86_REG_RIP };
+    use capstone::InsnGroupType::{ Type as InsnGroupType, CS_GRP_CALL, CS_GRP_JUMP };
+
+    let detail = disasm.insn_detail(inst).ok()?;
+    let _group_id = detail.groups()
+        .iter()
+        .map(|id| InsnGroupType::from(id.0))
+        .find(|&id| matches!(id, CS_GRP_CALL | CS_GRP_JUMP))?;
+
+    match detail.arch_detail() {
+        ArchDetail::X86Detail(inst_detail) => {
+            let operand = inst_detail.operands().next()?;
+
+            match operand.op_type {
+                X86OperandType::Imm(imm) => {
+                    let addr = imm.try_into().ok()?;
+                    addr2sym.get(addr).map(|_| addr)
+                },
+                X86OperandType::Mem(mem) if X86RegType::from(mem.base().0) == X86_REG_RIP => {
+                    let disp: u64 = mem.disp().try_into().ok()?;
+                    Some(inst.address() + disp)
+                },
+                _ => None
+            }
+        },
+        _ => None
+    }
+}
+
+fn query_symbol_by_addr(
+    explorer: &Explorer,
+    addr2sym: &SymbolMap<SymbolMapName<'static>>,
+    dyn_rela: &[(u64, object::read::Relocation)],
+    addr: u64,
+) -> anyhow::Result<Option<&'static str>> {
+    use object::read::RelocationTarget;
+
+    let addr2sym = addr2sym.symbols();
+
+    if let Ok(idx) = addr2sym.binary_search_by_key(&addr, |sym| sym.address()) {
+        Ok(Some(addr2sym[idx].name()))
+    } else {
+        // section check
+        {
+            let Some(section) = explorer.obj.section_by_name(".got")
+                else { return Ok(None) };            
+
+            let start = section.address();
+            let end = start + section.size();
+
+            if !(start..end).contains(&addr) {
+                return Ok(None);
+            }
+        }
+
+        let idx = match dyn_rela.binary_search_by_key(&addr, |(addr, _)| *addr) {
+            Ok(idx) => idx,
+            Err(idx) if dyn_rela.len() > idx => idx,
+            Err(_) => return Ok(None)
+        };
+        let (rela_addr, rela) = &dyn_rela[idx];
+
+        if !(addr..addr.saturating_add(8)).contains(&*rela_addr) {
+            return Ok(None);
+        }
+
+        let name = match rela.target() {
+            RelocationTarget::Symbol(symidx) => explorer.obj.symbol_by_index(symidx)
+                .ok()
+                .and_then(|sym| sym.name().ok()),
+            RelocationTarget::Absolute => {
+                let addr = rela.addend().try_into()?;
+                addr2sym.binary_search_by_key(&addr, |sym| sym.address())
+                    .ok()
+                    .map(|idx| addr2sym[idx].name())
+            },
+            _ => None
+        };        
+
+        Ok(name)
+    }
+    
 }
