@@ -31,7 +31,7 @@ symbolic-demangle = { version = "12", default-features = false, features = [
 	"cpp",
 	"msvc"
 ] }
-addr2line = "0.24"
+# addr2line = "0.24"
 
 # feature
 regex = { version = "1", default-features = false, features = [ "std", "perf" ] }
