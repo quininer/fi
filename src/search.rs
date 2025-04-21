@@ -1,35 +1,14 @@
+mod options;
+
 use std::io::Write;
-use clap::Args;
-use serde::{ Serialize, Deserialize };
 use aho_corasick::AhoCorasick;
 use bstr::ByteSlice;
 use object::{ Object, ObjectSection, ObjectSymbol };
 use symbolic_demangle::demangle;
 use crate::explorer::Explorer;
 use crate::util::{ Stdio, YieldPoint, is_data_section };
+pub use options::Command;
 
-
-/// search symbol name and data
-#[derive(Serialize, Deserialize)]
-#[derive(Debug, Args)]
-#[command(args_conflicts_with_subcommands = true)]
-#[command(flatten_help = true)]
-pub struct Command {
-    /// search keywords
-    keywords: Vec<String>,
-
-    /// demangle symbol name
-    #[arg(short, long, default_value_t = false)]
-    demangle: bool,
-
-    /// search by data instead of symbol name
-    #[arg(long, default_value_t = false)]
-    data: bool,
-
-    /// filter section by regex
-    #[arg(short, long)]
-    filter_section: Option<String>,
-}
 
 impl Command {
     pub async fn exec(self, explorer: &Explorer, stdio: &mut Stdio) -> anyhow::Result<()> {

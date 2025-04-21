@@ -1,37 +1,12 @@
+mod options;
+
 use std::io::Write;
 use anyhow::Context;
 use capstone::arch::{ BuildsCapstone, DetailsArchInsn };
-use clap::Args;
 use object::{ Object, ObjectSection, ObjectSymbol, SymbolKind, SymbolIndex, SectionIndex, SymbolMap, SymbolMapName };
-use serde::{ Serialize, Deserialize };
 use crate::explorer::Explorer;
 use crate::util::{ u64ptr, Stdio, HexPrinter, AsciiPrinter, YieldPoint };
-
-/// search symbol name and data
-#[derive(Serialize, Deserialize)]
-#[derive(Debug, Args)]
-#[command(args_conflicts_with_subcommands = true)]
-#[command(flatten_help = true)]
-pub struct Command {
-    /// show address
-    address: String,
-
-    /// show length
-    #[arg(long)]
-    length: Option<u64>,
-
-    /// no search symbol
-    #[arg(long, default_value_t = false)]
-    no_symbol: bool,
-
-    /// dump raw data
-    #[arg(long, default_value_t = false)]
-    dump: bool,
-
-    /// address align
-    #[arg(long)]
-    align: Option<u64>,
-}
+pub use options::Command;
 
 impl Command {
     pub async fn exec(self, explorer: &Explorer, stdio: &mut Stdio) -> anyhow::Result<()> {

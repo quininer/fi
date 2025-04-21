@@ -1,24 +1,15 @@
+mod options;
 mod server;
 
 use std::{ io, fs, env };
 use std::path::PathBuf;
-use clap::Args;
-use serde::{ Serialize, Deserialize };
 use directories::ProjectDirs;
 use crate::util::{ hashpath, hashname };
 use crate::call::SESSION_ENVNAME;
 use crate::explorer::Explorer;
 use server::Server;
+pub use options::Command;
 
-
-/// open file and listen ipc
-#[derive(Serialize, Deserialize)]
-#[derive(Debug, Args)]
-#[command(args_conflicts_with_subcommands = true)]
-#[command(flatten_help = true)]
-pub struct Command {
-    path: PathBuf
-}
 
 impl Command {
     pub fn exec(self, dir: &ProjectDirs) -> anyhow::Result<()> {

@@ -1,3 +1,4 @@
+mod options;
 mod listen;
 mod call;
 mod explorer;
@@ -6,30 +7,12 @@ mod show;
 mod util;
 
 use anyhow::Context;
-use clap::{ Parser, Subcommand };
-use serde::{ Serialize, Deserialize };
+use clap::Parser;
 use directories::ProjectDirs;
 use explorer::Explorer;
 use crate::util::Stdio;
+use crate::options::{ Options, Commands };
 
-
-/// Fi - binary analysis tools
-#[derive(Serialize, Deserialize)]
-#[derive(Debug, Parser)] // requires `derive` feature
-#[command(name = "fi")]
-struct Options {
-    #[command(subcommand)]
-    command: Commands,
-}
-
-
-#[derive(Serialize, Deserialize)]
-#[derive(Debug, Subcommand)]
-enum Commands {
-    Listen(listen::Command),
-    Search(search::Command),
-    Show(show::Command),
-}
 
 fn main() -> anyhow::Result<()> {
     let options = Options::parse();
