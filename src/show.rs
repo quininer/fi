@@ -201,6 +201,7 @@ async fn show_text(
             .build()?,
         object::Architecture::Aarch64 => Capstone::new()
             .arm64()
+            .mode(capstone::arch::arm64::ArchMode::Arm)
             .detail(true)
             .build()?,
         object::Architecture::Riscv64 => Capstone::new()
