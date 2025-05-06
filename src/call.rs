@@ -52,7 +52,7 @@ pub fn call(dir: &ProjectDirs, options: Box<Options>) -> anyhow::Result<()> {
         found.sort_by_key(|path| path.file_name()
             .and_then(|name| name.to_str())
             .filter(|name| name.starts_with(&prefix))
-            .is_some()
+            .is_none()
         );
 
         found
