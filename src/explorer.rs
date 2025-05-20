@@ -74,6 +74,40 @@ impl Explorer {
 
         kind
     }
+
+    pub async fn symbol_size(&self, idx: SymbolIndex) -> anyhow::Result<u64> {
+        let sym = self.obj.symbol_by_index(idx)?;
+
+        let section_idx = match sym.section() {
+            object::read::SymbolSection::Section(idx) => idx,
+            object::read::SymbolSection::Undefined => anyhow::bail!("symbol is undefined"),
+            section => anyhow::bail!("bad section: {:?}", section)
+        };
+
+
+        let size = if self.obj.format() != object::BinaryFormat::MachO {
+            sym.size()
+        } else {
+            let addr2sym = self.cache.addr2sym(&self.obj).await;
+            let symmap = addr2sym.symbols();
+
+            let idx = match symmap
+                .binary_search_by_key(&sym.address(), |sym| sym.address())
+            {
+                Ok(idx) => idx,
+                Err(_) => anyhow::bail!("not found symbol address")
+            };
+            match symmap.get(idx + 1) {
+                Some(next_addr) => next_addr.address() - sym.address(),
+                None => {
+                    let section = self.obj.section_by_index(section_idx)?;
+                    section.address() + section.size() - sym.address()
+                }
+            }
+        };
+
+        Ok(size)        
+    }
 }
 
 impl Cache {

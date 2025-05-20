@@ -64,7 +64,8 @@ async fn by_symbol(
 
     let data = explorer.cache.data(&explorer.obj, section_idx).await?;
     let offset = (sym.address() - section.address()) as usize;
-    let size = sym.size() as usize;
+    let size = explorer.symbol_size(sym_idx).await?;
+    let size = size as usize;
 
     let data = &data[offset..][..size];
 
