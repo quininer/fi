@@ -7,8 +7,8 @@ use serde::{ Serialize, Deserialize };
 #[command(args_conflicts_with_subcommands = true)]
 #[command(flatten_help = true)]
 pub struct Command {
-    /// search keywords
-    pub keywords: Vec<String>,
+    /// search keyword (regex)
+    pub keyword: String,
 
     /// demangle symbol name
     #[arg(short, long, default_value_t = false)]
@@ -21,5 +21,13 @@ pub struct Command {
     /// filter section by regex
     #[arg(short, long)]
     pub filter_section: Option<String>,
+
+    /// print size (symbol)
+    #[arg(short, long)]
+    pub size: bool,
+
+    /// sort by size (symbol)
+    #[arg(short, long)]
+    pub sort_size: bool,    
 }
 

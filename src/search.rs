@@ -1,40 +1,55 @@
 mod options;
 
 use std::io::Write;
-use aho_corasick::AhoCorasick;
 use bstr::ByteSlice;
 use object::{ Object, ObjectSection, ObjectSymbol };
 use symbolic_demangle::demangle;
 use crate::explorer::Explorer;
-use crate::util::{ Stdio, YieldPoint, is_data_section };
+use crate::util::{ Stdio, YieldPoint, OptionalPrinter, is_data_section };
 pub use options::Command;
 
 
 impl Command {
     pub async fn exec(self, explorer: &Explorer, stdio: &mut Stdio) -> anyhow::Result<()> {
-        let ac = AhoCorasick::new(&self.keywords)?;
-
         match self.data {
-            false => by_symbol(&self, &ac, explorer, stdio).await,
-            true => by_data(&self, &ac, explorer, stdio).await
+            false => by_symbol(&self, explorer, stdio).await,
+            true => by_data(&self, explorer, stdio).await
         }
     }
 }
 
 async fn by_symbol(
     cmd: &Command,
-    ac: &AhoCorasick,
     explorer: &Explorer,
     stdio: &mut Stdio
 )
     -> anyhow::Result<()>
 {
+    let re = regex::Regex::new(&cmd.keyword)?;
     let filter = cmd.filter_section
         .as_ref()
         .map(|rule| regex::Regex::new(rule))
         .transpose()?;
     let mut outbuf = Vec::new();
     let mut point = YieldPoint::default();
+    let mut output = Vec::new();
+
+    let mut print = |idx, size, name: &str| {
+        let sym = explorer.obj.symbol_by_index(idx)?;
+        let kind = explorer.symbol_kind(idx);
+        
+        outbuf.clear();
+        writeln!(
+            outbuf,
+            "{:018p}{} {} {}",
+            sym.address() as *const (),
+            OptionalPrinter(cmd.size.then_some(format_args!(" {:10}", size))),
+            kind,
+            name,
+        )?;
+        stdio.stdout.write_all(&outbuf)?;
+        Ok(()) as anyhow::Result<()>
+    };
 
     for (mangled_name, &idx) in explorer.cache.sym2idx(&explorer.obj).await {
         point.yield_now().await;
@@ -53,30 +68,39 @@ async fn by_symbol(
             }
         }
         
-        let name = demangle(mangled_name);
+        let name = if cmd.demangle {
+            demangle(mangled_name)
+        } else {
+            (*mangled_name).into()
+        };
 
-        if ac.is_match(name.as_bytes())
-            || cmd.keywords.iter().any(|w| mangled_name.ends_with(w))
-        {
-            let sym = explorer.obj.symbol_by_index(idx)?;
-            let kind = explorer.symbol_kind(idx);
+        if re.is_match(&name) {
+            let mut sym_size = 0;
 
-            let name = if !cmd.demangle {
-                mangled_name
+            if cmd.size || cmd.sort_size {
+                sym_size = explorer.symbol_size(idx).await?;
+            }
+
+            if !cmd.sort_size {
+                print(idx, sym_size, &name)?;
             } else {
-                name.as_ref()
-            };
-
-            outbuf.clear();
-            writeln!(
-                outbuf,
-                "{:018p} {} {}",
-                sym.address() as *const (),
-                kind,
-                name,
-            )?;
-            stdio.stdout.write_all(&outbuf)?;
+                output.push((idx, sym_size));
+            }
         }
+    }
+
+    output.sort_unstable_by_key(|(_, size)| *size);
+
+    for (idx, size) in output {
+        let sym = explorer.obj.symbol_by_index(idx)?;
+        let name = sym.name()?;
+        let name = if cmd.demangle {
+            demangle(name)
+        } else {
+            name.into()
+        };
+
+        print(idx, size, &name)?;
     }
 
     Ok(())
@@ -84,12 +108,12 @@ async fn by_symbol(
 
 async fn by_data(
     cmd: &Command,
-    ac: &AhoCorasick,
     explorer: &Explorer,
     stdio: &mut Stdio
 )
     -> anyhow::Result<()>
 {
+    let re = regex::bytes::Regex::new(&cmd.keyword)?;
     let filter = cmd.filter_section
         .as_ref()
         .map(|rule| regex::Regex::new(rule))
@@ -111,7 +135,7 @@ async fn by_data(
         if let Ok(data) = explorer.cache.data(&explorer.obj, section.index()).await {
             let base = section.address();
             
-            for mat in ac.find_iter(&*data) {
+            for mat in re.find_iter(&*data) {
                 let addr = base + mat.start() as u64;
                 point.yield_now().await;
 
