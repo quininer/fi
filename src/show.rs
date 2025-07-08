@@ -1,9 +1,14 @@
 mod options;
 
+use std::fs;
 use std::io::Write;
+use std::ops::Range;
+use std::collections::hash_map;
+use std::collections::HashMap;
 use anyhow::Context;
 use capstone::arch::{ BuildsCapstone, DetailsArchInsn };
 use object::{ Object, ObjectSection, ObjectSymbol, SymbolKind, SymbolIndex, SectionIndex, SymbolMap, SymbolMapName };
+use indexmap::IndexSet;
 use crate::explorer::Explorer;
 use crate::util::{ u64ptr, Stdio, HexPrinter, AsciiPrinter, YieldPoint };
 pub use options::Command;
@@ -140,7 +145,7 @@ async fn by_section(
 }
 
 async fn show_text(
-    _cmd: &Command,
+    cmd: &Command,
     explorer: &Explorer,
     section_idx: SectionIndex,
     symbol_idx: SymbolIndex,
@@ -188,11 +193,66 @@ async fn show_text(
             Ok(())            
         }
     }
+
+    #[derive(Debug)]
+    struct Line {
+        range: Range<u64>,
+        file: Option<usize>,
+        line: Option<u32>,
+        column: Option<u32>
+    }
+
+    let addr2line = if cmd.dwarf {
+        let path = cmd.dwarf_path.as_deref().unwrap_or(&explorer.path);
+        let addr2line = explorer.cache.addr2line.get_or_try_init(|| async {
+            addr2line::Loader::new(path).map(Into::into)
+        })
+            .await
+            .map_err(|err| anyhow::format_err!("addr2line: {:?}", err))?;
+        Some(addr2line)
+    } else {
+        None
+    };
     
     let section = explorer.obj.section_by_index(section_idx)?;
     let symbol = explorer.obj.symbol_by_index(symbol_idx)?;
     let addr2sym = explorer.cache.addr2sym(&explorer.obj).await;
     let dyn_rela = explorer.cache.dyn_rela(&explorer.obj).await;
+
+    if let Ok(name) = section.name() {
+        writeln!(stdio.stdout, "section: {}", name)?;
+    }
+
+    if let Ok(name) = symbol.name() {
+        writeln!(stdio.stdout, "symbol: {}", name)?;
+    }
+
+    let mut files = IndexSet::new();
+    let mut texts = HashMap::new();
+    let lines = if let Some(addr2line) = addr2line.as_ref() {
+        let addr2line = addr2line.lock().await;
+
+        let mut lines = addr2line.find_location_range(
+            symbol.address(),
+            symbol.address() + symbol.size()
+        )
+            .map_err(|err| anyhow::format_err!("addr2line: {:?}", err))?
+            .map(|(offset, len, location)| Line {
+                range: offset..offset + len,
+                file: location.file.map(|file| {
+                    files.insert_full(file.to_owned()).0
+                }),
+                line: location.line,
+                column: location.column
+            })
+            .collect::<Vec<_>>();
+        lines.sort_by_key(|line| line.range.start);
+        lines
+    } else {
+        Vec::new()
+    };
+    let mut last_fileid = None;
+    let mut cursor = 0;
 
     let disasm = match explorer.obj.architecture() {
         object::Architecture::X86_64 => Capstone::new()
@@ -214,16 +274,40 @@ async fn show_text(
     };
     let disasm = &disasm;
 
-    if let Ok(name) = section.name() {
-        writeln!(stdio.stdout, "section: {}", name)?;
-    }
-
-    if let Ok(name) = symbol.name() {
-        writeln!(stdio.stdout, "symbol: {}", name)?;
-    }
-
     let insts = disasm.disasm_all(data, symbol.address())?;
     for inst in insts.as_ref() {
+        if let Some(line) = lines.get(cursor)
+            && line.range.contains(&inst.address())
+        {
+            cursor += 1;
+
+            if let (Some(fileid), Some(n)) = (line.file, line.line) {
+                let text = match texts.entry(fileid) {
+                    hash_map::Entry::Occupied(e) => e.into_mut(),
+                    hash_map::Entry::Vacant(e) => {
+                        let path = files.get_index(fileid).unwrap();
+                        let text = fs::read_to_string(path)?;
+                        e.insert(text)
+                    },
+                };
+                let text = &text;
+
+                if let Some(text) = text.lines().nth(n.saturating_sub(1) as usize) {
+                    let path = files.get_index(fileid).unwrap();
+
+                    // TODO column highlight
+                    let _column = line.column;
+                    let text = text.trim_end();
+
+                    if last_fileid.replace(fileid) != Some(fileid) {
+                        writeln!(stdio.stdout, "file: {}", path)?;
+                    }
+
+                    writeln!(stdio.stdout, "{}", text)?;
+                }
+            }
+        }
+        
         let rela = RelaPrinter {
             explorer, disasm, addr2sym, dyn_rela, inst
         };
@@ -236,8 +320,6 @@ async fn show_text(
             InstPrinter(&inst),
             rela
         )?;
-
-        // TODO show debuginfo
     }
     
     Ok(())
@@ -379,5 +461,4 @@ fn query_symbol_by_addr(
 
         Ok(name)
     }
-    
 }

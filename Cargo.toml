@@ -1,7 +1,7 @@
 [package]
 name = "fi"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 [workspace]
 members = [ "shell-completion" ]
@@ -24,7 +24,7 @@ passfd = "0.1"
 
 # object
 memmap2 = "0.9"
-object = "0.36"
+object = "0.37"
 indexmap = "2"
 aho-corasick = "1"
 symbolic-demangle = { version = "12", default-features = false, features = [
@@ -32,7 +32,7 @@ symbolic-demangle = { version = "12", default-features = false, features = [
 	"cpp",
 	"msvc"
 ] }
-# addr2line = "0.24"
+addr2line = "0.25"
 
 # feature
 regex = { version = "1", default-features = false, features = [ "std", "perf" ] }

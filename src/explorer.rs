@@ -1,16 +1,18 @@
 use std::fs;
-use std::path::Path;
+use std::path::PathBuf;
 use std::borrow::Cow;
 use std::sync::{ Arc, OnceLock };
 use std::collections::HashMap;
-use tokio::sync::{ OnceCell, RwLock };
+use tokio::sync::{ OnceCell, RwLock, Mutex };
 use memmap2::{ MmapOptions, Mmap };
 use object::{ Object, ObjectSymbol, ObjectSection };
 use object::read::{ SectionIndex, SymbolIndex };
+use addr2line::Loader;
 use indexmap::IndexMap;
 
 
 pub struct Explorer {
+    pub path: PathBuf,
     pub obj: object::File<'static>,
     pub cache: Cache,
 }
@@ -20,6 +22,7 @@ pub struct Cache {
     pub addr2sym: OnceCell<object::read::SymbolMap<object::read::SymbolMapName<'static>>>,
     pub sym2idx: OnceCell<IndexMap<&'static str, SymbolIndex>>,
     pub dyn_rela: OnceCell<Box<[(u64, object::read::Relocation)]>>,
+    pub addr2line: OnceCell<Mutex<Loader>>,
     pub data: DataCache
 }
 
@@ -32,8 +35,8 @@ pub struct DataCache {
 static TARGET: OnceLock<(fs::File, Mmap)> = OnceLock::new();
 
 impl Explorer {
-    pub fn open(path: &Path) -> anyhow::Result<Explorer> {
-        let fd = fs::File::open(path)?;
+    pub fn open(path: PathBuf) -> anyhow::Result<Explorer> {
+        let fd = fs::File::open(&path)?;
         let mmap = unsafe {
             MmapOptions::new().map_copy_read_only(&fd)?
         };
@@ -41,7 +44,7 @@ impl Explorer {
         let obj = object::File::parse(mmap.as_ref())?;
 
         Ok(Explorer {
-            obj,
+            path, obj,
             cache: Cache::default(),
         })
     }

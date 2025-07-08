@@ -35,7 +35,7 @@ impl Command {
             dir.join(path)
         };
 
-        let explorer = Explorer::open(&self.path)?;
+        let explorer = Explorer::open(self.path)?;
 
         let rt = tokio::runtime::Builder::new_multi_thread()
             .enable_all()

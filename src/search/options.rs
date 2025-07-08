@@ -27,7 +27,7 @@ pub struct Command {
     pub size: bool,
 
     /// sort by size (symbol)
-    #[arg(short, long)]
+    #[arg(long)]
     pub sort_size: bool,    
 }
 

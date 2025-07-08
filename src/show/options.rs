@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use clap::Args;
 use serde::{ Serialize, Deserialize };
 
@@ -25,5 +26,13 @@ pub struct Command {
     /// address align
     #[arg(long)]
     pub align: Option<u64>,
+
+    /// show source code by dwarf
+    #[arg(long)]
+    pub dwarf: bool,
+
+    /// set dwarf path
+    #[arg(long)]
+    pub dwarf_path: Option<PathBuf>,
 }
 
