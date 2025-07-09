@@ -99,7 +99,7 @@ impl YieldPoint {
 
 pub struct HexPrinter<'a>(pub &'a [u8], pub usize);
 pub struct AsciiPrinter<'a>(pub &'a [u8]);
-pub struct OptionalPrinter<T>(pub Option<T>);
+pub struct MaybePrinter<T>(pub Option<T>, pub Option<char>);
 
 impl fmt::Display for HexPrinter<'_> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -135,9 +135,11 @@ impl fmt::Display for AsciiPrinter<'_> {
     }
 }
 
-impl<T: fmt::Display> fmt::Display for OptionalPrinter<T> {
+impl<T: fmt::Display> fmt::Display for MaybePrinter<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if let Some(t) = self.0.as_ref() {
+            fmt::Display::fmt(t, f)?;
+        } else if let Some(t) = self.1.as_ref() {
             fmt::Display::fmt(t, f)?;
         }
 

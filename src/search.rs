@@ -5,7 +5,7 @@ use bstr::ByteSlice;
 use object::{ Object, ObjectSection, ObjectSymbol };
 use symbolic_demangle::demangle;
 use crate::explorer::Explorer;
-use crate::util::{ Stdio, YieldPoint, OptionalPrinter, is_data_section };
+use crate::util::{ Stdio, YieldPoint, MaybePrinter, is_data_section };
 pub use options::Command;
 
 
@@ -43,7 +43,7 @@ async fn by_symbol(
             outbuf,
             "{:018p}{} {} {}",
             sym.address() as *const (),
-            OptionalPrinter(cmd.size.then_some(format_args!(" {:10}", size))),
+            MaybePrinter(cmd.size.then_some(format_args!(" {:10}", size)), None),
             kind,
             name,
         )?;

@@ -10,7 +10,7 @@ use capstone::arch::{ BuildsCapstone, DetailsArchInsn };
 use object::{ Object, ObjectSection, ObjectSymbol, SymbolKind, SymbolIndex, SectionIndex, SymbolMap, SymbolMapName };
 use indexmap::IndexSet;
 use crate::explorer::Explorer;
-use crate::util::{ u64ptr, Stdio, HexPrinter, AsciiPrinter, YieldPoint };
+use crate::util::{ u64ptr, Stdio, HexPrinter, AsciiPrinter, MaybePrinter, YieldPoint };
 pub use options::Command;
 
 impl Command {
@@ -295,12 +295,16 @@ async fn show_text(
                 if let Some(text) = text.lines().nth(n.saturating_sub(1) as usize) {
                     let path = files.get_index(fileid).unwrap();
 
-                    // TODO column highlight
-                    let _column = line.column;
                     let text = text.trim_end();
 
                     if last_fileid.replace(fileid) != Some(fileid) {
-                        writeln!(stdio.stdout, "file: {}", path)?;
+                        writeln!(
+                            stdio.stdout,
+                            "file: {}:{},{}",
+                            path,
+                            MaybePrinter(line.line, Some('?')),
+                            MaybePrinter(line.column, Some('?')),
+                        )?;
                     }
 
                     writeln!(stdio.stdout, "{}", text)?;
