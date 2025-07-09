@@ -9,11 +9,19 @@ use std::collections::HashMap;
 use anyhow::Context;
 use symbolic_demangle::demangle;
 use capstone::arch::{ BuildsCapstone, DetailsArchInsn };
-use object::{ Object, ObjectSection, ObjectSymbol, SymbolKind, SymbolIndex, SectionIndex, SymbolMap, SymbolMapName };
+use object::{
+    Object, ObjectSection, ObjectSymbol,
+    SectionIndex, SectionKind,
+    SymbolKind, SymbolIndex, SymbolMap, SymbolMapName
+};
 use indexmap::IndexSet;
 use owo_colors::OwoColorize;
 use crate::explorer::Explorer;
-use crate::util::{ u64ptr, Stdio, HexPrinter, AsciiPrinter, MaybePrinter, YieldPoint, IfSupported, Hyperlink, EitherPrinter };
+use crate::util::{
+    u64ptr, Stdio, YieldPoint,
+    HexPrinter, AsciiPrinter, MaybePrinter, EitherPrinter,
+    IfSupported, Hyperlink
+};
 pub use options::Command;
 
 impl Command {
@@ -84,7 +92,11 @@ async fn by_symbol(
     let size = explorer.symbol_size(sym_idx).await?;
     let size = size as usize;
 
-    let data = &data[offset..][..size];
+    let data = if !matches!(section.kind(), SectionKind::UninitializedData | SectionKind::UninitializedTls) {
+        &data[offset..][..size]
+    } else {
+        &[]
+    };
 
     if cmd.dump {
         dump_data(data, stdio).await?;
