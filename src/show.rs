@@ -3,14 +3,16 @@ mod options;
 use std::fs;
 use std::io::Write;
 use std::ops::Range;
+use std::path::Path;
 use std::collections::hash_map;
 use std::collections::HashMap;
 use anyhow::Context;
 use capstone::arch::{ BuildsCapstone, DetailsArchInsn };
 use object::{ Object, ObjectSection, ObjectSymbol, SymbolKind, SymbolIndex, SectionIndex, SymbolMap, SymbolMapName };
 use indexmap::IndexSet;
+use owo_colors::OwoColorize;
 use crate::explorer::Explorer;
-use crate::util::{ u64ptr, Stdio, HexPrinter, AsciiPrinter, MaybePrinter, YieldPoint };
+use crate::util::{ u64ptr, Stdio, HexPrinter, AsciiPrinter, MaybePrinter, YieldPoint, IfSupported, Hyperlink, EitherPrinter };
 pub use options::Command;
 
 impl Command {
@@ -220,11 +222,21 @@ async fn show_text(
     let dyn_rela = explorer.cache.dyn_rela(&explorer.obj).await;
 
     if let Ok(name) = section.name() {
-        writeln!(stdio.stdout, "section: {}", name)?;
+        writeln!(
+            stdio.stdout,
+            "{} {}",
+            "section:".if_supported(stdio.colored, |a| a.cyan()),
+            name
+        )?;        
     }
 
     if let Ok(name) = symbol.name() {
-        writeln!(stdio.stdout, "symbol: {}", name)?;
+        writeln!(
+            stdio.stdout,
+            "{} {}",
+            "symbol:".if_supported(stdio.colored, |a| a.cyan()),
+            name
+        )?;        
     }
 
     let mut files = IndexSet::new();
@@ -281,33 +293,53 @@ async fn show_text(
         {
             cursor += 1;
 
-            if let (Some(fileid), Some(n)) = (line.file, line.line) {
+            if let Some(fileid) = line.file {
+                let path = files.get_index(fileid).unwrap();
                 let text = match texts.entry(fileid) {
-                    hash_map::Entry::Occupied(e) => e.into_mut(),
+                    hash_map::Entry::Occupied(e) => Some(e.into_mut()),
                     hash_map::Entry::Vacant(e) => {
-                        let path = files.get_index(fileid).unwrap();
-                        let text = fs::read_to_string(path)?;
-                        e.insert(text)
+                        fs::read_to_string(path)
+                            .ok()
+                            .map(|text| e.insert(text))
                     },
                 };
-                let text = &text;
 
-                if let Some(text) = text.lines().nth(n.saturating_sub(1) as usize) {
-                    let path = files.get_index(fileid).unwrap();
-
-                    let text = text.trim_end();
-
-                    if last_fileid.replace(fileid) != Some(fileid) {
-                        writeln!(
-                            stdio.stdout,
-                            "file: {}:{},{}",
-                            path,
+                if last_fileid.replace(fileid) != Some(fileid) {
+                    let path_ref = Path::new(path);
+                    
+                    writeln!(
+                        stdio.stdout,
+                        "{} {}{}",
+                        "file:".if_supported(stdio.colored, |a| a.cyan()),
+                        if stdio.hyperlink {
+                            EitherPrinter::Left(Hyperlink::new(
+                                MaybePrinter(path_ref.file_name().map(|name| name.display()), None),
+                                path
+                            ))
+                        } else {
+                            EitherPrinter::Right(path)
+                        }.if_supported(stdio.colored, |a| a.dimmed()),
+                        format_args!(
+                            ":{},{}",
                             MaybePrinter(line.line, Some('?')),
                             MaybePrinter(line.column, Some('?')),
-                        )?;
-                    }
+                        ).if_supported(stdio.colored, |a| a.dimmed())
+                    )?;
+                }                
 
-                    writeln!(stdio.stdout, "{}", text)?;
+                if let Some(text) = text.as_ref()
+                    && let Some(n) = line.line
+                    && let Some(text) = text.lines().nth(n.saturating_sub(1) as usize)
+                {
+                    let mid = text.len().min(line.column.unwrap_or_default().saturating_sub(1) as usize);
+                    let (text0, text1) = text.split_at(mid);
+
+                    writeln!(
+                        stdio.stdout,
+                        "{}{}",
+                        text0.if_supported(stdio.colored, |a| a.dimmed()),
+                        text1
+                    )?;
                 }
             }
         }
@@ -319,10 +351,10 @@ async fn show_text(
         writeln!(
             stdio.stdout,
             "{:018p}  {}  {}{}",
-            inst.address() as *const (),
-            HexPrinter(inst.bytes(), 8),
+            (inst.address() as *const ()),
+            HexPrinter(inst.bytes(), 8).if_supported(stdio.colored, |a| a.dimmed()),
             InstPrinter(&inst),
-            rela
+            rela.if_supported(stdio.colored, |a| a.dimmed())
         )?;
     }
     
@@ -337,11 +369,21 @@ async fn show_data(
     stdio: &mut Stdio    
 ) -> anyhow::Result<()> {
     if let Some(name) = section_name {
-        writeln!(stdio.stdout, "section: {}", name)?;
+        writeln!(
+            stdio.stdout,
+            "{} {}",
+            "section:".if_supported(stdio.colored, |a| a.cyan()),
+            name
+        )?;
     }
 
     if let Some(name) = symbol_name {
-        writeln!(stdio.stdout, "symbol: {}", name)?;
+        writeln!(
+            stdio.stdout,
+            "{} {}",
+            "symbol:".if_supported(stdio.colored, |a| a.cyan()),
+            name
+        )?;
     }
 
     let addr = start;

@@ -27,6 +27,8 @@ pub fn hashname(path: &Path) -> String {
 }
 
 pub struct Stdio {
+    pub colored: bool,
+    pub hyperlink: bool,
     #[allow(dead_code)]
     pub stdin: File,
     pub stdout: File,
@@ -100,6 +102,10 @@ impl YieldPoint {
 pub struct HexPrinter<'a>(pub &'a [u8], pub usize);
 pub struct AsciiPrinter<'a>(pub &'a [u8]);
 pub struct MaybePrinter<T>(pub Option<T>, pub Option<char>);
+pub enum EitherPrinter<A, B> {
+    Left(A),
+    Right(B)
+}
 
 impl fmt::Display for HexPrinter<'_> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -144,5 +150,57 @@ impl<T: fmt::Display> fmt::Display for MaybePrinter<T> {
         }
 
         Ok(())
+    }
+}
+
+impl<A: fmt::Display, B: fmt::Display> fmt::Display for EitherPrinter<A, B> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            EitherPrinter::Left(a) => fmt::Display::fmt(a, f),
+            EitherPrinter::Right(b) => fmt::Display::fmt(b, f),
+        }
+    }
+}
+
+pub trait IfSupported {
+    fn if_supported<'a, F, O>(&'a self, flag: bool, f: F)
+        -> EitherPrinter<O, &'a Self>
+    where
+        F: FnOnce(&'a Self) -> O,
+        O: 'a
+    ;
+}
+
+impl<T> IfSupported for T {
+    fn if_supported<'a, F, O>(&'a self, flag: bool, f: F)
+        -> EitherPrinter<O, &'a Self>
+    where
+        F: FnOnce(&'a Self) -> O,
+        O: 'a
+    {
+        if flag {
+            EitherPrinter::Left(f(self))
+        } else {
+            EitherPrinter::Right(self)
+        }
+    }
+}
+
+pub struct Hyperlink<T, L> {
+    text: T,
+    link: L
+}
+
+impl<T: fmt::Display, L: AsRef<str>> Hyperlink<T, L> {
+    pub fn new(text: T, link: L) -> Self {
+        Hyperlink { text, link }
+    }
+}
+
+impl<T: fmt::Display, L: AsRef<str>> fmt::Display for Hyperlink<T, L> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "\x1B]8;;{}\x1B\\", self.link.as_ref())?;
+        fmt::Display::fmt(&self.text, f)?;
+        write!(f, "\x1B]8;;\x1B\\")
     }
 }

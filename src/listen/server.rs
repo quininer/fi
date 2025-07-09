@@ -55,6 +55,8 @@ async fn exec(
     let stderr = recv_fd(&stream).await?;
     let mut stdio = unsafe {
         Stdio {
+            colored: start.colored,
+            hyperlink: start.hyperlink,
             stdin: File::from_raw_fd(stdin),
             stdout: File::from_raw_fd(stdout),
             stderr: File::from_raw_fd(stderr)

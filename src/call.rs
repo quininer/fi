@@ -15,6 +15,8 @@ pub const SESSION_ENVNAME: &str = "FI_SESSION";
 
 #[derive(Serialize, Deserialize)]
 pub struct Start {
+    pub colored: bool,
+    pub hyperlink: bool,
     pub options: Box<Options>
 }
 
@@ -68,7 +70,12 @@ fn exec(ipc_path: PathBuf, options: Box<Options>) -> anyhow::Result<()> {
     let mut stream = UnixStream::connect(ipc_path).context("session connect failed")?;
 
     {
-        let options = Start { options };
+        let colored = supports_color::on(supports_color::Stream::Stdout).is_some();
+        let options = Start {
+            colored,
+            hyperlink: colored && supports_hyperlinks::supports_hyperlinks(),
+            options
+        };
         let buf = cbor4ii::serde::to_vec(Vec::new(), &options)?;
         let len: u16 = buf.len().try_into().context("command too long")?;
 

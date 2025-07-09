@@ -11,6 +11,9 @@ members = [ "shell-completion" ]
 anyhow = "1"
 bstr = "1"
 clap = { version = "4", features = [ "derive" ] }
+owo-colors = "4"
+supports-hyperlinks = "3"
+supports-color = "3"
 
 # ipc
 libc = "0.2"
