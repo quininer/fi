@@ -36,16 +36,22 @@ async fn by_symbol(
 )
     -> anyhow::Result<()>
 {
+    let symlist = explorer.cache.symlist(&explorer.obj).await;
     let map = explorer.cache.addr2sym(&explorer.obj).await;
     let map = map.symbols();
+
     let (idx, sym_idx)= match map.binary_search_by_key(&addr, |sym| sym.address()) {
         Ok(idx) => (idx, None),
         Err(idx) => {
             let idx = idx.saturating_sub(1);
             let sym = map.get(idx).context("no available symbols found")?;
-            let &sym_idx = explorer.cache.sym2idx(&explorer.obj).await
-                .get(sym.name())
+            let symlist_idx = symlist.binary_search_by_key(
+                &sym.address(),
+                |&symidx| explorer.obj.symbol_by_index(symidx).unwrap().address()
+            )
+                .ok()
                 .context("not found symbol")?;
+            let sym_idx = symlist[symlist_idx];
             let sym = explorer.obj.symbol_by_index(sym_idx)?;
             let start = sym.address();
             let end = start + sym.size();
@@ -61,10 +67,13 @@ async fn by_symbol(
     let sym_idx = if let Some(sym_idx) = sym_idx {
         sym_idx
     } else {
-        explorer.cache.sym2idx(&explorer.obj).await
-            .get(map[idx].name())
-            .copied()
-            .context("not found symbol")?
+        let symlist_idx = symlist.binary_search_by_key(
+            &map[idx].address(),
+            |&symidx| explorer.obj.symbol_by_index(symidx).unwrap().address()
+        )
+            .ok()
+            .context("not found symbol")?;
+        symlist[symlist_idx]
     };
     let sym = explorer.obj.symbol_by_index(sym_idx)?;
     let section_idx = sym.section_index().context("not found section index")?;

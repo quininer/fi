@@ -51,8 +51,17 @@ async fn by_symbol(
         Ok(()) as anyhow::Result<()>
     };
 
-    for (mangled_name, &idx) in explorer.cache.sym2idx(&explorer.obj).await {
+    for &idx in explorer.cache.symlist(&explorer.obj).await {
         point.yield_now().await;
+
+        let sym = explorer.obj.symbol_by_index(idx).unwrap();
+        let mangled_name = match sym.name() {
+            Ok(name) => name,
+            Err(err) => {
+                eprintln!("bad symbol name: {:?}", err);
+                continue
+            }
+        };
         
         // filter section by regex
         if let Some(rule) = filter.as_ref() {

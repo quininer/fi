@@ -8,7 +8,6 @@ use memmap2::{ MmapOptions, Mmap };
 use object::{ Object, ObjectSymbol, ObjectSection };
 use object::read::{ SectionIndex, SymbolIndex };
 use addr2line::Loader;
-use indexmap::IndexMap;
 
 
 pub struct Explorer {
@@ -20,7 +19,7 @@ pub struct Explorer {
 #[derive(Default)]
 pub struct Cache {
     pub addr2sym: OnceCell<object::read::SymbolMap<object::read::SymbolMapName<'static>>>,
-    pub sym2idx: OnceCell<IndexMap<&'static str, SymbolIndex>>,
+    pub symlist: OnceCell<Box<[SymbolIndex]>>,
     pub dyn_rela: OnceCell<Box<[(u64, object::read::Relocation)]>>,
     pub addr2line: OnceCell<Mutex<Loader>>,
     pub data: DataCache
@@ -116,23 +115,15 @@ impl Cache {
         self.addr2sym.get_or_init(async || obj.symbol_map()).await
     }
 
-    pub async fn sym2idx<'a>(&'a self, obj: &object::File<'static>)
-        -> &'a IndexMap<&'static str, SymbolIndex>
+    pub async fn symlist<'a>(&'a self, obj: &object::File<'static>)
+        -> &'a [SymbolIndex]
     {
-        self.sym2idx.get_or_init(async || {
-            let mut map = IndexMap::new();
-            for sym in obj.symbols() {
-                let sym_name = match sym.name() {
-                    Ok(name) => name,
-                    Err(err) => {
-                        eprintln!("bad symbol name: {:?}", err);
-                        continue
-                    }
-                };
-                map.insert(sym_name, sym.index());
-            }
-            map.shrink_to_fit();
-            map
+        self.symlist.get_or_init(async || {
+            let mut list = obj.symbols()
+                .map(|sym| sym.index())
+                .collect::<Vec<_>>();
+            list.sort_by_key(|&symidx| obj.symbol_by_index(symidx).unwrap().address());
+            list.into_boxed_slice()
         }).await
     }
 
