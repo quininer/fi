@@ -23,6 +23,10 @@ pub struct Command {
     #[arg(long, default_value_t = false)]
     pub dump: bool,
 
+    /// demangle symbol
+    #[arg(short, long)]
+    pub demangle: bool,
+
     /// address align
     #[arg(long)]
     pub align: Option<u64>,

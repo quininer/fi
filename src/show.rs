@@ -7,6 +7,7 @@ use std::path::Path;
 use std::collections::hash_map;
 use std::collections::HashMap;
 use anyhow::Context;
+use symbolic_demangle::demangle;
 use capstone::arch::{ BuildsCapstone, DetailsArchInsn };
 use object::{ Object, ObjectSection, ObjectSymbol, SymbolKind, SymbolIndex, SectionIndex, SymbolMap, SymbolMapName };
 use indexmap::IndexSet;
@@ -89,6 +90,7 @@ async fn by_symbol(
         ).await?;
     } else {
         show_data(
+            cmd,
             section.name().ok(),
             Some(map[idx].name()),
             sym.address(),
@@ -135,6 +137,7 @@ async fn by_section(
         dump_data(data, stdio).await?;
     } else {
         show_data(
+            cmd,
             section.name().ok(),
             None,
             addr,
@@ -172,6 +175,7 @@ async fn show_text(
     }
 
     struct RelaPrinter<'a> {
+        demangle: bool,
         explorer: &'a Explorer,
         disasm: &'a Capstone,
         addr2sym: &'a SymbolMap<SymbolMapName<'static>>,
@@ -188,7 +192,11 @@ async fn show_text(
                     self.dyn_rela,
                     addr
                 ) {
-                    write!(f, "\t# {}", name)?;
+                    write!(
+                        f,
+                        "\t# {}",
+                        name.if_supported(self.demangle, |name| demangle(name))
+                    )?;
                 }
             }
 
@@ -235,7 +243,7 @@ async fn show_text(
             stdio.stdout,
             "{} {}",
             "symbol:".if_supported(stdio.colored, |a| a.cyan()),
-            name
+            name.if_supported(cmd.demangle, |name| demangle(name))
         )?;        
     }
 
@@ -345,6 +353,7 @@ async fn show_text(
         }
         
         let rela = RelaPrinter {
+            demangle: cmd.demangle,
             explorer, disasm, addr2sym, dyn_rela, inst
         };
         
@@ -353,7 +362,7 @@ async fn show_text(
             "{:018p}  {}  {}{}",
             (inst.address() as *const ()),
             HexPrinter(inst.bytes(), 8).if_supported(stdio.colored, |a| a.dimmed()),
-            InstPrinter(&inst),
+            InstPrinter(inst),
             rela.if_supported(stdio.colored, |a| a.dimmed())
         )?;
     }
@@ -362,6 +371,7 @@ async fn show_text(
 }
 
 async fn show_data(
+    cmd: &Command,
     section_name: Option<&str>,
     symbol_name: Option<&str>,
     start: u64,
@@ -382,7 +392,7 @@ async fn show_data(
             stdio.stdout,
             "{} {}",
             "symbol:".if_supported(stdio.colored, |a| a.cyan()),
-            name
+            name.if_supported(cmd.demangle, |name| demangle(name))
         )?;
     }
 
@@ -417,10 +427,10 @@ async fn dump_data(data: &[u8], stdio: &mut Stdio) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn operand2addr<'a>(
+fn operand2addr(
     disasm: &capstone::Capstone,
     addr2sym: &SymbolMap<SymbolMapName<'_>>,
-    inst: &'a capstone::Insn<'_>,
+    inst: &capstone::Insn<'_>,
 )
     -> Option<u64>
 {
@@ -488,7 +498,7 @@ fn query_symbol_by_addr(
         };
         let (rela_addr, rela) = &dyn_rela[idx];
 
-        if !(addr..addr.saturating_add(8)).contains(&*rela_addr) {
+        if !(addr..addr.saturating_add(8)).contains(rela_addr) {
             return Ok(None);
         }
 
