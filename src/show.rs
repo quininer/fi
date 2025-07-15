@@ -14,7 +14,7 @@ use object::{
     SectionIndex, SectionKind,
     SymbolKind, SymbolIndex, SymbolMap, SymbolMapName
 };
-use indexmap::IndexSet;
+use indexmap::{ IndexSet, IndexMap };
 use owo_colors::OwoColorize;
 use crate::explorer::Explorer;
 use crate::util::{
@@ -266,7 +266,7 @@ async fn show_text(
             "symbol:".if_supported(stdio.colored, |a| a.cyan()),
             name.if_supported(cmd.demangle, |name| demangle(name))
         )?;        
-    }
+    }    
 
     let mut files = IndexSet::new();
     let mut texts = HashMap::new();
@@ -295,97 +295,145 @@ async fn show_text(
     let mut last_fileid = None;
     let mut cursor = 0;
 
-    let disasm = match explorer.obj.architecture() {
-        object::Architecture::X86_64 => Capstone::new()
-            .x86()
-            .mode(capstone::arch::x86::ArchMode::Mode64)
-            .detail(true)
-            .build()?,
-        object::Architecture::Aarch64 => Capstone::new()
-            .arm64()
-            .mode(capstone::arch::arm64::ArchMode::Arm)
-            .detail(true)
-            .build()?,
-        object::Architecture::Riscv64 => Capstone::new()
-            .riscv()
-            .mode(capstone::arch::riscv::ArchMode::RiscV64)
-            .detail(true)
-            .build()?,
-        arch => anyhow::bail!("unsupported arch: {:?}", arch)
-    };
-    let disasm = &disasm;
+    // print top
+    if cmd.dwarf_top {
+        use addr2line::fallible_iterator::FallibleIterator;
 
-    let insts = disasm.disasm_all(data, symbol.address())?;
-    for inst in insts.as_ref() {
-        if let Some(line) = lines.get(cursor)
-            && line.range.contains(&inst.address())
-        {
-            cursor += 1;
+        let addr2line = addr2line.as_ref().context("need --dward")?;
+        let addr2line = addr2line.lock().await;
+        let mut map: IndexMap<_, u64> = IndexMap::new();
 
-            if let Some(fileid) = line.file {
-                let path = files.get_index(fileid).unwrap();
-                let text = match texts.entry(fileid) {
-                    hash_map::Entry::Occupied(e) => Some(e.into_mut()),
-                    hash_map::Entry::Vacant(e) => {
-                        fs::read_to_string(path)
-                            .ok()
-                            .map(|text| e.insert(text))
-                    },
-                };
+        for line in &lines {
+            let len = line.range.end - line.range.start;
 
-                if last_fileid.replace(fileid) != Some(fileid) {
-                    let path_ref = Path::new(path);
-                    
-                    writeln!(
-                        stdio.stdout,
-                        "{} {}{}",
-                        "file:".if_supported(stdio.colored, |a| a.cyan()),
-                        if stdio.hyperlink {
-                            EitherPrinter::Left(Hyperlink::new(
-                                MaybePrinter(path_ref.file_name().map(|name| name.display()), None),
-                                path
-                            ))
-                        } else {
-                            EitherPrinter::Right(path)
-                        }.if_supported(stdio.colored, |a| a.dimmed()),
-                        format_args!(
-                            ":{},{}",
-                            MaybePrinter(line.line, Some('?')),
-                            MaybePrinter(line.column, Some('?')),
-                        ).if_supported(stdio.colored, |a| a.dimmed())
-                    )?;
-                }                
-
-                if let Some(text) = text.as_ref()
-                    && let Some(n) = line.line
-                    && let Some(text) = text.lines().nth(n.saturating_sub(1) as usize)
-                {
-                    let mid = text.len().min(line.column.unwrap_or_default().saturating_sub(1) as usize);
-                    let (text0, text1) = text.split_at(mid);
-
-                    writeln!(
-                        stdio.stdout,
-                        "{}{}",
-                        text0.if_supported(stdio.colored, |a| a.dimmed()),
-                        text1
-                    )?;
+            let mut iter = addr2line.find_frames(line.range.start)
+                .map_err(|err| anyhow::format_err!("addr2line: {:?}", err))?
+                .filter_map(|frame| Ok(frame.function))
+                .filter_map(|name| Ok(name.raw_name().ok().map(|name| name.into_owned())))
+                .peekable();
+            let mut last = None;
+            while let Some(next) = iter.next()? {
+                if iter.peek()?.is_some() || last.is_none() {
+                    last = Some(next);
                 }
             }
+
+            if let Some(frame) = last {
+                *map.entry(frame).or_default() += len;
+            } else {
+                *map.entry("<unknown>".into()).or_default() += len;
+            }
         }
-        
-        let rela = RelaPrinter {
-            demangle: cmd.demangle,
-            explorer, disasm, addr2sym, dyn_rela, inst
+
+        let mut map: Vec<_> = map.into_iter().collect();
+        map.sort_by_key(|(_, count)| *count);
+
+        for (symbol, count) in map {
+            writeln!(
+                stdio.stdout,
+                "{:10 }\t{}",
+                count,
+                symbol.if_supported(cmd.demangle, |s| demangle(s)),
+            )?;
+        }
+
+        return Ok(());
+    }    
+
+    // print asm
+    {
+        let disasm = match explorer.obj.architecture() {
+            object::Architecture::X86_64 => Capstone::new()
+                .x86()
+                .mode(capstone::arch::x86::ArchMode::Mode64)
+                .detail(true)
+                .build()?,
+            object::Architecture::Aarch64 => Capstone::new()
+                .arm64()
+                .mode(capstone::arch::arm64::ArchMode::Arm)
+                .detail(true)
+                .build()?,
+            object::Architecture::Riscv64 => Capstone::new()
+                .riscv()
+                .mode(capstone::arch::riscv::ArchMode::RiscV64)
+                .detail(true)
+                .build()?,
+            arch => anyhow::bail!("unsupported arch: {:?}", arch)
         };
+        let disasm = &disasm;
+
+        let insts = disasm.disasm_all(data, symbol.address())?;
+        for inst in insts.as_ref() {
+            if let Some(line) = lines.get(cursor)
+                && line.range.contains(&inst.address())
+            {
+                cursor += 1;
+
+                if let Some(fileid) = line.file {
+                    let path = files.get_index(fileid).unwrap();
+                    let text = match texts.entry(fileid) {
+                        hash_map::Entry::Occupied(e) => Some(e.into_mut()),
+                        hash_map::Entry::Vacant(e) => {
+                            fs::read_to_string(path)
+                                .ok()
+                                .map(|text| e.insert(text))
+                        },
+                    };
+
+                    if last_fileid.replace(fileid) != Some(fileid) {
+                        let path_ref = Path::new(path);
+                    
+                        writeln!(
+                            stdio.stdout,
+                            "{} {}{}",
+                            "file:".if_supported(stdio.colored, |a| a.cyan()),
+                            if stdio.hyperlink {
+                                EitherPrinter::Left(Hyperlink::new(
+                                    MaybePrinter(path_ref.file_name().map(|name| name.display()), None),
+                                    path
+                                ))
+                            } else {
+                                EitherPrinter::Right(path)
+                            }.if_supported(stdio.colored, |a| a.dimmed()),
+                            format_args!(
+                                ":{},{}",
+                                MaybePrinter(line.line, Some('?')),
+                                MaybePrinter(line.column, Some('?')),
+                            ).if_supported(stdio.colored, |a| a.dimmed())
+                        )?;
+                    }                
+
+                    if let Some(text) = text.as_ref()
+                        && let Some(n) = line.line
+                        && let Some(text) = text.lines().nth(n.saturating_sub(1) as usize)
+                    {
+                        let mid = text.len().min(line.column.unwrap_or_default().saturating_sub(1) as usize);
+                        let (text0, text1) = text.split_at(mid);
+
+                        writeln!(
+                            stdio.stdout,
+                            "{}{}",
+                            text0.if_supported(stdio.colored, |a| a.dimmed()),
+                            text1
+                        )?;
+                    }
+                }
+            }
         
-        writeln!(
-            stdio.stdout,
-            "{:018p}  {}  {}{}",
-            (inst.address() as *const ()),
-            HexPrinter(inst.bytes(), 8).if_supported(stdio.colored, |a| a.dimmed()),
-            InstPrinter(inst),
-            rela.if_supported(stdio.colored, |a| a.dimmed())
-        )?;
+            let rela = RelaPrinter {
+                demangle: cmd.demangle,
+                explorer, disasm, addr2sym, dyn_rela, inst
+            };
+        
+            writeln!(
+                stdio.stdout,
+                "{:018p}  {}  {}{}",
+                (inst.address() as *const ()),
+                HexPrinter(inst.bytes(), 8).if_supported(stdio.colored, |a| a.dimmed()),
+                InstPrinter(inst),
+                rela.if_supported(stdio.colored, |a| a.dimmed())
+            )?;
+        }
     }
     
     Ok(())

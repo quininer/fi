@@ -38,5 +38,8 @@ pub struct Command {
     /// set dwarf path
     #[arg(long)]
     pub dwarf_path: Option<PathBuf>,
-}
 
+    /// show instr top usage by dwarf (bytes)
+    #[arg(long)]
+    pub dwarf_top: bool
+}
