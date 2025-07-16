@@ -5,7 +5,7 @@ use std::sync::{ Arc, OnceLock };
 use std::collections::HashMap;
 use tokio::sync::{ OnceCell, RwLock, Mutex };
 use memmap2::{ MmapOptions, Mmap };
-use object::{ Object, ObjectSymbol, ObjectSection };
+use object::{ Object, ObjectSection, ObjectSymbol, ObjectSymbolTable };
 use object::read::{ SectionIndex, SymbolIndex };
 use addr2line::Loader;
 
@@ -83,17 +83,20 @@ impl Explorer {
         let size = if self.obj.format() != object::BinaryFormat::MachO {
             sym.size()
         } else {
-            let addr2sym = self.cache.addr2sym(&self.obj).await;
-            let symmap = addr2sym.symbols();
+            let symlist = self.cache.symlist(&self.obj).await;
 
-            let idx = match symmap
-                .binary_search_by_key(&sym.address(), |sym| sym.address())
-            {
+            let idx = match symlist.binary_search_by(|&idx0| {
+                let sym0 = self.obj.symbol_by_index(idx0).unwrap();
+                sym0.address().cmp(&sym.address())
+            }) {
                 Ok(idx) => idx,
                 Err(_) => anyhow::bail!("not found symbol address")
             };
-            match symmap.get(idx + 1) {
-                Some(next_addr) => next_addr.address() - sym.address(),
+            match symlist.get(idx + 1) {
+                Some(&sym1) => {
+                    let sym1 = self.obj.symbol_by_index(sym1).unwrap();
+                    sym1.address() - sym.address()
+                },
                 None => match sym.section() {
                     object::read::SymbolSection::Section(section_idx) => {
                         let section = self.obj.section_by_index(section_idx)?;
@@ -119,7 +122,10 @@ impl Cache {
         -> &'a [SymbolIndex]
     {
         self.symlist.get_or_init(async || {
-            let mut list = obj.symbols()
+            let mut list = obj.symbol_table()
+                .into_iter()
+                .map(|symtab| symtab.symbols())
+                .flatten()
                 .map(|sym| sym.index())
                 .collect::<Vec<_>>();
             list.sort_by_key(|&symidx| obj.symbol_by_index(symidx).unwrap().address());
