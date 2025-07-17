@@ -33,5 +33,8 @@ pub struct Command {
     /// sort by name (symbol)
     #[arg(long)]
     pub sort_name: bool,
-}
 
+    /// only print duplicate
+    #[arg(long)]
+    pub only_duplicate: bool,
+}

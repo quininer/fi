@@ -1,6 +1,7 @@
 mod options;
 
 use std::cmp;
+use std::collections::HashSet;
 use std::io::Write;
 use bstr::ByteSlice;
 use object::{ Object, ObjectSection, ObjectSymbol };
@@ -90,10 +91,10 @@ async fn by_symbol(
 
             if cmd.size || cmd.sort_size {
                 sym_size = explorer.symbol_size(idx).await?;
-                sum += sym_size;
             }
 
-            if !cmd.sort_size && !cmd.sort_name {
+            if !cmd.sort_size && !cmd.sort_name && !cmd.only_duplicate {
+                sum += sym_size;
                 print(idx, sym_size, &name)?;
             } else {
                 output.push((idx, name, sym_size));
@@ -108,8 +109,18 @@ async fn by_symbol(
         (true, true) => (name0, size0).cmp(&(name1, size1))
     });
 
-    for (idx, name, size) in output {
-        print(idx, size, &name)?;
+    let mut dup = HashSet::new();
+
+    for (idx, name, size) in &output {
+        if cmd.only_duplicate {
+            let dupname = name.split('.').next().unwrap_or(name);
+            if dup.insert(dupname) {
+                continue;
+            }
+        }
+
+        sum += size;
+        print(*idx, *size, name)?;
     }
 
     if cmd.size {
