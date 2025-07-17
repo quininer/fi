@@ -1,5 +1,6 @@
 mod options;
 
+use std::cmp;
 use std::io::Write;
 use bstr::ByteSlice;
 use object::{ Object, ObjectSection, ObjectSymbol };
@@ -90,25 +91,22 @@ async fn by_symbol(
                 sym_size = explorer.symbol_size(idx).await?;
             }
 
-            if !cmd.sort_size {
+            if !cmd.sort_size && !cmd.sort_name {
                 print(idx, sym_size, &name)?;
             } else {
-                output.push((idx, sym_size));
+                output.push((idx, name, sym_size));
             }
         }
     }
 
-    output.sort_unstable_by_key(|(_, size)| *size);
+    output.sort_unstable_by(|(_, name0, size0), (_, name1, size1)| match (cmd.sort_size, cmd.sort_name) {
+        (false, false) => cmp::Ordering::Equal,
+        (true, false) => size0.cmp(&size1),
+        (false, true) => name0.cmp(&name1),
+        (true, true) => (name0, size0).cmp(&(name1, size1))
+    });
 
-    for (idx, size) in output {
-        let sym = explorer.obj.symbol_by_index(idx)?;
-        let name = sym.name()?;
-        let name = if cmd.demangle {
-            demangle(name)
-        } else {
-            name.into()
-        };
-
+    for (idx, name, size) in output {
         print(idx, size, &name)?;
     }
 

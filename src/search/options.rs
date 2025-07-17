@@ -28,6 +28,10 @@ pub struct Command {
 
     /// sort by size (symbol)
     #[arg(long)]
-    pub sort_size: bool,    
+    pub sort_size: bool,
+    
+    /// sort by name (symbol)
+    #[arg(long)]
+    pub sort_name: bool,
 }
 
