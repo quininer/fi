@@ -51,6 +51,7 @@ async fn by_symbol(
         stdio.stdout.write_all(&outbuf)?;
         Ok(()) as anyhow::Result<()>
     };
+    let mut sum = 0;
 
     for &idx in explorer.cache.symlist(&explorer.obj).await {
         point.yield_now().await;
@@ -89,6 +90,7 @@ async fn by_symbol(
 
             if cmd.size || cmd.sort_size {
                 sym_size = explorer.symbol_size(idx).await?;
+                sum += sym_size;
             }
 
             if !cmd.sort_size && !cmd.sort_name {
@@ -108,6 +110,10 @@ async fn by_symbol(
 
     for (idx, name, size) in output {
         print(idx, size, &name)?;
+    }
+
+    if cmd.size {
+        writeln!(stdio.stdout, "sum: {}", sum)?;
     }
 
     Ok(())
