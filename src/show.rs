@@ -8,7 +8,7 @@ use std::collections::hash_map;
 use std::collections::HashMap;
 use anyhow::Context;
 use symbolic_demangle::demangle;
-use capstone::arch::{ BuildsCapstone, DetailsArchInsn };
+use capstone::arch::DetailsArchInsn;
 use object::{
     Object, ObjectSection, ObjectSymbol,
     SectionIndex, SectionKind,
@@ -206,19 +206,19 @@ async fn show_text(
 
     impl fmt::Display for RelaPrinter<'_> {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            if let Some(addr) = operand2addr(self.disasm, self.addr2sym, self.inst) {
-                if let Ok(Some(name)) = query_symbol_by_addr(
+            if let Some(addr) = operand2addr(self.disasm, self.addr2sym, self.inst)
+                && let Some((name, addr)) = query_symbol_by_addr(
                     self.explorer,
                     self.addr2sym,
                     self.dyn_rela,
                     addr
-                ) {
-                    write!(
-                        f,
-                        "\t# {}",
-                        name.if_supported(self.demangle, |name| demangle(name))
-                    )?;
-                }
+            ) {
+                write!(
+                    f,
+                    "\t# {} @ {:018p}",
+                    name.if_supported(self.demangle, |name| demangle(name)),
+                    addr as *const ()
+                )?;
             }
 
             Ok(())            
@@ -342,24 +342,7 @@ async fn show_text(
 
     // print asm
     {
-        let disasm = match explorer.obj.architecture() {
-            object::Architecture::X86_64 => Capstone::new()
-                .x86()
-                .mode(capstone::arch::x86::ArchMode::Mode64)
-                .detail(true)
-                .build()?,
-            object::Architecture::Aarch64 => Capstone::new()
-                .arm64()
-                .mode(capstone::arch::arm64::ArchMode::Arm)
-                .detail(true)
-                .build()?,
-            object::Architecture::Riscv64 => Capstone::new()
-                .riscv()
-                .mode(capstone::arch::riscv::ArchMode::RiscV64)
-                .detail(true)
-                .build()?,
-            arch => anyhow::bail!("unsupported arch: {:?}", arch)
-        };
+        let disasm = build_disasm(&explorer.obj)?;
         let disasm = &disasm;
 
         let insts = disasm.disasm_all(data, symbol.address())?;
@@ -496,7 +479,7 @@ async fn dump_data(data: &[u8], stdio: &mut Stdio) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn operand2addr(
+pub(crate) fn operand2addr(
     disasm: &capstone::Capstone,
     addr2sym: &SymbolMap<SymbolMapName<'_>>,
     inst: &capstone::Insn<'_>,
@@ -534,56 +517,82 @@ fn operand2addr(
     }
 }
 
-fn query_symbol_by_addr(
+pub(crate) fn query_symbol_by_addr(
     explorer: &Explorer,
     addr2sym: &SymbolMap<SymbolMapName<'static>>,
     dyn_rela: &[(u64, object::read::Relocation)],
     addr: u64,
-) -> anyhow::Result<Option<&'static str>> {
+) -> Option<(&'static str, u64)> {
     use object::read::RelocationTarget;
 
     let addr2sym = addr2sym.symbols();
 
     if let Ok(idx) = addr2sym.binary_search_by_key(&addr, |sym| sym.address()) {
-        Ok(Some(addr2sym[idx].name()))
+        let sym = &addr2sym[idx];
+        Some((sym.name(), sym.address()))
     } else {
         // section check
         {
-            let Some(section) = explorer.obj.section_by_name(".got")
-                else { return Ok(None) };            
+            let section = explorer.obj.section_by_name(".got")?;
 
             let start = section.address();
             let end = start + section.size();
 
             if !(start..end).contains(&addr) {
-                return Ok(None);
+                return None;
             }
         }
 
         let idx = match dyn_rela.binary_search_by_key(&addr, |(addr, _)| *addr) {
             Ok(idx) => idx,
             Err(idx) if dyn_rela.len() > idx => idx,
-            Err(_) => return Ok(None)
+            Err(_) => return None
         };
         let (rela_addr, rela) = &dyn_rela[idx];
 
         if !(addr..addr.saturating_add(8)).contains(rela_addr) {
-            return Ok(None);
+            return None;
         }
 
-        let name = match rela.target() {
-            RelocationTarget::Symbol(symidx) => explorer.obj.symbol_by_index(symidx)
-                .ok()
-                .and_then(|sym| sym.name().ok()),
+        match rela.target() {
+            RelocationTarget::Symbol(symidx) => {
+                let sym = explorer.obj.symbol_by_index(symidx).ok()?;
+                let name = sym.name().ok()?;
+                Some((name, sym.address()))
+            },
             RelocationTarget::Absolute => {
-                let addr = rela.addend().try_into()?;
-                addr2sym.binary_search_by_key(&addr, |sym| sym.address())
-                    .ok()
-                    .map(|idx| addr2sym[idx].name())
+                let addr = rela.addend().try_into().ok()?;
+                let idx = addr2sym.binary_search_by_key(&addr, |sym| sym.address()).ok()?;
+                let sym = &addr2sym[idx];
+                Some((sym.name(), sym.address()))
             },
             _ => None
-        };        
-
-        Ok(name)
+        }
     }
+}
+
+pub(crate) fn build_disasm(obj: &object::File<'_>) -> anyhow::Result<capstone::Capstone> {
+    use capstone::Capstone;
+    use capstone::arch::BuildsCapstone;
+    
+    let disasm = match obj.architecture() {
+        object::Architecture::X86_64 => Capstone::new()
+            .x86()
+            .mode(capstone::arch::x86::ArchMode::Mode64)
+            .detail(true)
+            .build()?,
+        object::Architecture::Aarch64 => Capstone::new()
+            .arm64()
+            .mode(capstone::arch::arm64::ArchMode::Arm)
+            .detail(true)
+            .build()?,
+        object::Architecture::Riscv64 => Capstone::new()
+            .riscv()
+            .mode(capstone::arch::riscv::ArchMode::RiscV64)
+            .detail(true)
+            .build()?,
+        arch => anyhow::bail!("unsupported arch: {:?}", arch)
+    };
+
+    Ok(disasm)
 }

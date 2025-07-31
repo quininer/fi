@@ -7,7 +7,7 @@ use serde::{ Serialize, Deserialize };
 #[command(args_conflicts_with_subcommands = true)]
 #[command(flatten_help = true)]
 pub struct Command {
-    /// search keyword (regex)
+    /// search keyword (regex, symbol address)
     pub keyword: String,
 
     /// demangle symbol name
@@ -15,8 +15,12 @@ pub struct Command {
     pub demangle: bool,
 
     /// search by data instead of symbol name
-    #[arg(long, default_value_t = false)]
+    #[arg(long)]
     pub data: bool,
+
+    /// search for direct calls by symbol address
+    #[arg(long)]
+    pub callsite: bool,
 
     /// filter section by regex
     #[arg(short, long)]
@@ -34,7 +38,7 @@ pub struct Command {
     #[arg(long)]
     pub sort_name: bool,
 
-    /// only print duplicate
+    /// only print duplicate (symbol)
     #[arg(long)]
     pub only_duplicate: bool,
 }
