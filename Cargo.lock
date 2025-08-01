@@ -349,6 +349,7 @@ dependencies = [
  "capstone",
  "cbor4ii",
  "clap",
+ "clap_complete",
  "data-encoding",
  "directories",
  "indexmap",
@@ -707,15 +708,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
-]
-
-[[package]]
-name = "shell-completion"
-version = "0.1.0"
-dependencies = [
- "clap",
- "clap_complete",
- "serde",
 ]
 
 [[package]]

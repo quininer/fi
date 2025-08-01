@@ -1,9 +1,0 @@
-[package]
-name = "shell-completion"
-version = "0.1.0"
-edition = "2024"
-
-[dependencies]
-clap = { version = "4", features = [ "derive" ] }
-clap_complete = "4"
-serde = { version = "1", features = [ "derive" ] }

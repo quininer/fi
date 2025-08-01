@@ -4,6 +4,7 @@ mod call;
 mod explorer;
 mod search;
 mod show;
+mod complete;
 mod util;
 
 use anyhow::Context;
@@ -20,6 +21,7 @@ fn main() -> anyhow::Result<()> {
         .context("not found project dirs")?;
 
     match options.command {
+        Commands::Complete(cmd) => cmd.exec(),
         Commands::Listen(cmd) => cmd.exec(&dir),
         _ => call::call(&dir, Box::new(options))
     }
@@ -30,7 +32,7 @@ impl Commands {
         -> anyhow::Result<()>
     {
         match self {
-            Commands::Listen(_) => Ok(()),
+            Commands::Complete(_) | Commands::Listen(_) => Ok(()),
             Commands::Search(cmd) => cmd.exec(explorer, stdio).await,
             Commands::Show(cmd) => cmd.exec(explorer, stdio).await,
         }

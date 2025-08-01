@@ -3,14 +3,12 @@ name = "fi"
 version = "0.1.0"
 edition = "2024"
 
-[workspace]
-members = [ "shell-completion" ]
-
 [dependencies]
 # cli
 anyhow = "1"
 bstr = "1"
 clap = { version = "4", features = [ "derive" ] }
+clap_complete = "4"
 owo-colors = "4"
 supports-hyperlinks = "3"
 supports-color = "3"

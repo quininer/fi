@@ -14,6 +14,7 @@ pub struct Options {
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Subcommand)]
 pub enum Commands {
+    Complete(complete::Command),
     Listen(listen::Command),
     Search(search::Command),
     Show(show::Command),
