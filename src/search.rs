@@ -32,12 +32,14 @@ async fn by_symbol(cmd: &Command, explorer: &Explorer, stdio: &mut Stdio)
         .as_ref()
         .map(|rule| regex::Regex::new(rule))
         .transpose()?;
+    let symlist = explorer.cache.symlist(&explorer.obj).await;
+    
     let mut outbuf = Vec::new();
     let mut point = YieldPoint::default();
     let mut output = Vec::new();
     let mut sum = 0;
 
-    for &idx in explorer.cache.symlist(&explorer.obj).await {
+    for &idx in symlist {
         point.yield_now().await;
 
         let sym = explorer.obj.symbol_by_index(idx).unwrap();
@@ -73,7 +75,7 @@ async fn by_symbol(cmd: &Command, explorer: &Explorer, stdio: &mut Stdio)
             let mut sym_size = 0;
 
             if cmd.size || cmd.sort_size {
-                sym_size = explorer.symbol_size(idx).await?;
+                sym_size = explorer.symbol_size(symlist, idx)?;
             }
 
             if !cmd.sort_size && !cmd.sort_name && !cmd.only_duplicate {
@@ -171,7 +173,14 @@ async fn by_data(cmd: &Command, explorer: &Explorer, stdio: &mut Stdio)
 async fn by_call(cmd: &Command, explorer: &Explorer, stdio: &mut Stdio)
     -> anyhow::Result<()>
 {
+    use std::rc::Rc;
+    use std::cell::RefCell;
+    use rayon::prelude::*;
     use super::show;
+
+    thread_local! {
+        static DISASM: RefCell<Option<Rc<capstone::Capstone>>> = const { RefCell::new(None) };
+    }
     
     let address = u64ptr(&cmd.keyword)?;
     let symlist = explorer.cache.symlist(&explorer.obj).await;
@@ -193,45 +202,62 @@ async fn by_call(cmd: &Command, explorer: &Explorer, stdio: &mut Stdio)
     let section = explorer.obj.section_by_index(section_idx)?;
     let section_data = explorer.cache.data(&explorer.obj, section_idx).await?;
 
-    let mut point = YieldPoint::default();
-    let mut output = Vec::new();
+    let mut output = symlist
+        .par_iter()
+        .filter_map(|&symidx| {
+            let sym = explorer.obj.symbol_by_index(symidx).unwrap();
 
-    for &symidx in symlist {
-        point.yield_now().await;
-
-        let sym = explorer.obj.symbol_by_index(symidx).unwrap();
-        if sym.section_index() != Some(section_idx) {
-            continue
-        }
-
-        let mangled_name = sym.name().unwrap();
-        let name = if cmd.demangle {
-            demangle(mangled_name)
-        } else {
-            (*mangled_name).into()
-        };
-
-        let offset = (sym.address() - section.address()) as usize;
-        let size = explorer.symbol_size(symidx).await?;
-        let data = &section_data[offset..][..size as usize];
-
-        let disasm = show::build_disasm(&explorer.obj)?;
-        let disasm = &disasm;
-
-        let insts = disasm.disasm_all(data, sym.address())?;
-        for inst in insts.as_ref() {
-            if let Some(addr) = show::operand2addr(disasm, addr2sym, inst)
-                && let Some((_name, addr)) = query_symbol_by_addr(explorer, addr2sym, dyn_rela, addr)
-                && addr == address
-            {
-                output.push((symidx, name, size));
-                break
+            if sym.section_index() != Some(section_idx) {
+                return None;
             }
-        }
-    }
 
-    output.sort_unstable_by(|(_, name0, size0), (_, name1, size1)| match (cmd.sort_size, cmd.sort_name) {
-        (false, false) => cmp::Ordering::Equal,
+            let mangled_name = sym.name().unwrap();
+            let name = if cmd.demangle {
+                demangle(mangled_name)
+            } else {
+                (*mangled_name).into()
+            };
+
+            let offset = (sym.address() - section.address()) as usize;
+            let size = match explorer.symbol_size(symlist, symidx) {
+                Ok(size) => size,
+                Err(err) => return Some(Err(err))
+            };
+            let data = &section_data[offset..][..size as usize];
+
+            let disasm = DISASM.with_borrow_mut(|disasm| {
+                if let Some(disasm) = disasm.as_ref() {
+                    Ok(disasm.clone())
+                } else {
+                    let disasm2 = show::build_disasm(&explorer.obj)?;
+                    Ok(disasm.get_or_insert(Rc::new(disasm2)).clone())
+                }
+            });
+            let disasm = match disasm {
+                Ok(disasm) => disasm,
+                Err(err) => return Some(Err(err))
+            };
+            let disasm = &*disasm;
+
+            let insts = match disasm.disasm_all(data, sym.address()) {
+                Ok(insts) => insts,
+                Err(err) => return Some(Err(err.into()))
+            };
+            for inst in insts.as_ref() {
+                if let Some(addr) = show::operand2addr(disasm, addr2sym, inst)
+                    && let Some((_name, addr)) = query_symbol_by_addr(explorer, addr2sym, dyn_rela, addr)
+                    && addr == address
+                {
+                    return Some(Ok((symidx, name, size)));
+                }
+            }
+
+            None
+        })
+        .collect::<anyhow::Result<Vec<_>>>()?;
+
+    output.sort_unstable_by(|(idx0, name0, size0), (idx1, name1, size1)| match (cmd.sort_size, cmd.sort_name) {
+        (false, false) => idx0.0.cmp(&idx1.0),
         (true, false) => size0.cmp(&size1),
         (false, true) => name0.cmp(&name1),
         (true, true) => (name0, size0).cmp(&(name1, size1))

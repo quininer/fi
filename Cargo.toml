@@ -40,3 +40,4 @@ addr2line = "0.25"
 # feature
 regex = { version = "1", default-features = false, features = [ "std", "perf" ] }
 capstone = "0.13"
+rayon = "1"

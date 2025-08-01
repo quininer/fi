@@ -77,14 +77,12 @@ impl Explorer {
         kind
     }
 
-    pub async fn symbol_size(&self, idx: SymbolIndex) -> anyhow::Result<u64> {
+    pub fn symbol_size(&self, symlist: &[SymbolIndex], idx: SymbolIndex) -> anyhow::Result<u64> {
         let sym = self.obj.symbol_by_index(idx)?;
 
         let size = if self.obj.format() != object::BinaryFormat::MachO {
             sym.size()
         } else {
-            let symlist = self.cache.symlist(&self.obj).await;
-
             let idx = match symlist.binary_search_by(|&idx0| {
                 let sym0 = self.obj.symbol_by_index(idx0).unwrap();
                 sym0.address().cmp(&sym.address())

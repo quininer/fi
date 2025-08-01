@@ -89,7 +89,7 @@ async fn by_symbol(
 
     let data = explorer.cache.data(&explorer.obj, section_idx).await?;
     let offset = (sym.address() - section.address()) as usize;
-    let size = explorer.symbol_size(sym_idx).await?;
+    let size = explorer.symbol_size(symlist, sym_idx)?;
     let size = size as usize;
 
     let data = if !matches!(section.kind(), SectionKind::UninitializedData | SectionKind::UninitializedTls) {
