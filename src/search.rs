@@ -8,7 +8,6 @@ use bstr::ByteSlice;
 use object::{ Object, ObjectSection, ObjectSymbol };
 use symbolic_demangle::demangle;
 use crate::explorer::Explorer;
-use crate::show::query_symbol_by_addr;
 use crate::util::{ Stdio, YieldPoint, MaybePrinter, is_data_section, u64ptr };
 pub use options::Command;
 
@@ -19,7 +18,7 @@ impl Command {
             (false, false) => by_symbol(&self, explorer, stdio).await,
             (true, false) => by_call(&self, explorer, stdio).await,
             (false, true) => by_data(&self, explorer, stdio).await,
-            (true, true) => anyhow::bail!("cannot use `--call` and `--data` at the same time")
+            (true, true) => anyhow::bail!("cannot use `--callsite` and `--data` at the same time")
         }
     }
 }
@@ -179,7 +178,8 @@ async fn by_call(cmd: &Command, explorer: &Explorer, stdio: &mut Stdio)
     use super::show;
 
     thread_local! {
-        static DISASM: RefCell<Option<Rc<capstone::Capstone>>> = const { RefCell::new(None) };
+        static DISASM_CACHE: RefCell<Option<Rc<capstone::Capstone>>> =
+            const { RefCell::new(None) };
     }
     
     let address = u64ptr(&cmd.keyword)?;
@@ -225,7 +225,7 @@ async fn by_call(cmd: &Command, explorer: &Explorer, stdio: &mut Stdio)
             };
             let data = &section_data[offset..][..size as usize];
 
-            let disasm = DISASM.with_borrow_mut(|disasm| {
+            let disasm = DISASM_CACHE.with_borrow_mut(|disasm| {
                 if let Some(disasm) = disasm.as_ref() {
                     Ok(disasm.clone())
                 } else {
@@ -245,7 +245,7 @@ async fn by_call(cmd: &Command, explorer: &Explorer, stdio: &mut Stdio)
             };
             for inst in insts.as_ref() {
                 if let Some(addr) = show::operand2addr(disasm, addr2sym, inst)
-                    && let Some((_name, addr)) = query_symbol_by_addr(explorer, addr2sym, dyn_rela, addr)
+                    && let Some((_name, addr)) = show::query_symbol_by_addr(explorer, addr2sym, dyn_rela, addr)
                     && addr == address
                 {
                     return Some(Ok((symidx, name, size)));
