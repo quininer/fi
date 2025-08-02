@@ -5,6 +5,7 @@ mod explorer;
 mod search;
 mod show;
 mod complete;
+mod disasm;
 mod util;
 
 use anyhow::Context;

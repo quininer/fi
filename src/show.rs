@@ -8,7 +8,6 @@ use std::collections::hash_map;
 use std::collections::HashMap;
 use anyhow::Context;
 use symbolic_demangle::demangle;
-use capstone::arch::DetailsArchInsn;
 use object::{
     Object, ObjectSection, ObjectSymbol,
     SectionIndex, SectionKind,
@@ -22,6 +21,7 @@ use crate::util::{
     HexPrinter, AsciiPrinter, MaybePrinter, EitherPrinter,
     IfSupported, Hyperlink
 };
+use crate::disasm::{ self, Disassembler };
 pub use options::Command;
 
 impl Command {
@@ -179,34 +179,19 @@ async fn show_text(
     stdio: &mut Stdio    
 ) -> anyhow::Result<()> {
     use std::fmt;
-    use capstone::Capstone;
-
-    struct InstPrinter<'a>(&'a capstone::Insn<'a>);
-
-    impl fmt::Display for InstPrinter<'_> {
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            write!(f, "{}", self.0.mnemonic().unwrap_or("???"))?;
-
-            if let Some(op_str) = self.0.op_str() {
-                write!(f, " {}", op_str)?;
-            }
-
-            Ok(())
-        }
-    }
 
     struct RelaPrinter<'a> {
         demangle: bool,
         explorer: &'a Explorer,
-        disasm: &'a Capstone,
+        disasm: &'a Disassembler,
         addr2sym: &'a SymbolMap<SymbolMapName<'static>>,
         dyn_rela: &'a [(u64, object::read::Relocation)],
-        inst: &'a capstone::Insn<'a>,
+        inst: &'a disasm::Inst<'a>,
     }
 
     impl fmt::Display for RelaPrinter<'_> {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            if let Some(addr) = operand2addr(self.disasm, self.addr2sym, self.inst)
+            if let Ok(Some(addr)) = self.disasm.operand2addr(self.inst)
                 && let Some((name, addr)) = query_symbol_by_addr(
                     self.explorer,
                     self.addr2sym,
@@ -342,11 +327,14 @@ async fn show_text(
 
     // print asm
     {
-        let disasm = build_disasm(&explorer.obj)?;
+        let disasm = Disassembler::new(&explorer.obj)?;
         let disasm = &disasm;
 
         let insts = disasm.disasm_all(data, symbol.address())?;
-        for inst in insts.as_ref() {
+        for inst in insts.iter()? {
+            let inst = inst?;
+            let inst = &inst;
+
             if let Some(line) = lines.get(cursor)
                 && line.range.contains(&inst.address())
             {
@@ -413,7 +401,7 @@ async fn show_text(
                 "{:018p}  {}  {}{}",
                 (inst.address() as *const ()),
                 HexPrinter(inst.bytes(), 8).if_supported(stdio.colored, |a| a.dimmed()),
-                InstPrinter(inst),
+                inst,
                 rela.if_supported(stdio.colored, |a| a.dimmed())
             )?;
         }
@@ -479,44 +467,6 @@ async fn dump_data(data: &[u8], stdio: &mut Stdio) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub(crate) fn operand2addr(
-    disasm: &capstone::Capstone,
-    addr2sym: &SymbolMap<SymbolMapName<'_>>,
-    inst: &capstone::Insn<'_>,
-)
-    -> Option<u64>
-{
-    use capstone::arch::ArchDetail;
-    use capstone::arch::x86::X86OperandType;
-    use capstone::arch::x86::X86Reg::{ Type as X86RegType, X86_REG_RIP };
-    use capstone::InsnGroupType::{ Type as InsnGroupType, CS_GRP_CALL, CS_GRP_JUMP };
-
-    let detail = disasm.insn_detail(inst).ok()?;
-    let _group_id = detail.groups()
-        .iter()
-        .map(|id| InsnGroupType::from(id.0))
-        .find(|&id| matches!(id, CS_GRP_CALL | CS_GRP_JUMP))?;
-
-    match detail.arch_detail() {
-        ArchDetail::X86Detail(inst_detail) => {
-            let operand = inst_detail.operands().next()?;
-
-            match operand.op_type {
-                X86OperandType::Imm(imm) => {
-                    let addr = imm.try_into().ok()?;
-                    addr2sym.get(addr).map(|_| addr)
-                },
-                X86OperandType::Mem(mem) if X86RegType::from(mem.base().0) == X86_REG_RIP => {
-                    let disp: u64 = mem.disp().try_into().ok()?;
-                    Some(inst.address() + disp)
-                },
-                _ => None
-            }
-        },
-        _ => None
-    }
-}
-
 pub(crate) fn query_symbol_by_addr(
     explorer: &Explorer,
     addr2sym: &SymbolMap<SymbolMapName<'static>>,
@@ -569,30 +519,4 @@ pub(crate) fn query_symbol_by_addr(
             _ => None
         }
     }
-}
-
-pub(crate) fn build_disasm(obj: &object::File<'_>) -> anyhow::Result<capstone::Capstone> {
-    use capstone::Capstone;
-    use capstone::arch::BuildsCapstone;
-    
-    let disasm = match obj.architecture() {
-        object::Architecture::X86_64 => Capstone::new()
-            .x86()
-            .mode(capstone::arch::x86::ArchMode::Mode64)
-            .detail(true)
-            .build()?,
-        object::Architecture::Aarch64 => Capstone::new()
-            .arm64()
-            .mode(capstone::arch::arm64::ArchMode::Arm)
-            .detail(true)
-            .build()?,
-        object::Architecture::Riscv64 => Capstone::new()
-            .riscv()
-            .mode(capstone::arch::riscv::ArchMode::RiscV64)
-            .detail(true)
-            .build()?,
-        arch => anyhow::bail!("unsupported arch: {:?}", arch)
-    };
-
-    Ok(disasm)
 }

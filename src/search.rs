@@ -9,6 +9,7 @@ use object::{ Object, ObjectSection, ObjectSymbol };
 use symbolic_demangle::demangle;
 use crate::explorer::Explorer;
 use crate::util::{ Stdio, YieldPoint, MaybePrinter, is_data_section, u64ptr };
+use crate::disasm::Disassembler;
 pub use options::Command;
 
 
@@ -178,7 +179,7 @@ async fn by_call(cmd: &Command, explorer: &Explorer, stdio: &mut Stdio)
     use super::show;
 
     thread_local! {
-        static DISASM_CACHE: RefCell<Option<Rc<capstone::Capstone>>> =
+        static DISASM_CACHE: RefCell<Option<Rc<Disassembler>>> =
             const { RefCell::new(None) };
     }
     
@@ -229,7 +230,7 @@ async fn by_call(cmd: &Command, explorer: &Explorer, stdio: &mut Stdio)
                 if let Some(disasm) = disasm.as_ref() {
                     Ok(disasm.clone())
                 } else {
-                    let disasm2 = show::build_disasm(&explorer.obj)?;
+                    let disasm2 = Disassembler::new(&explorer.obj)?;
                     Ok(disasm.get_or_insert(Rc::new(disasm2)).clone())
                 }
             });
@@ -243,9 +244,17 @@ async fn by_call(cmd: &Command, explorer: &Explorer, stdio: &mut Stdio)
                 Ok(insts) => insts,
                 Err(err) => return Some(Err(err.into()))
             };
-            for inst in insts.as_ref() {
-                if let Some(addr) = show::operand2addr(disasm, addr2sym, inst)
-                    && let Some((_name, addr)) = show::query_symbol_by_addr(explorer, addr2sym, dyn_rela, addr)
+            for inst in insts.iter()
+                .ok()?
+                .filter_map(|inst| inst.ok())
+            {
+                let addr = match disasm.operand2addr(&inst) {
+                    Ok(Some(addr)) => addr,
+                    Ok(None) => return None,
+                    Err(err) => return Some(Err(err))
+                };
+                
+                if let Some((_name, addr)) = show::query_symbol_by_addr(explorer, addr2sym, dyn_rela, addr)
                     && addr == address
                 {
                     return Some(Ok((symidx, name, size)));
