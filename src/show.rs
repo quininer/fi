@@ -1,9 +1,7 @@
-mod options;
-
 use std::fs;
 use std::io::Write;
 use std::ops::Range;
-use std::path::Path;
+use std::path::{ Path, PathBuf };
 use std::collections::hash_map;
 use std::collections::HashMap;
 use anyhow::Context;
@@ -15,6 +13,10 @@ use object::{
 };
 use indexmap::{ IndexSet, IndexMap };
 use owo_colors::OwoColorize;
+
+use clap::Args;
+use serde::{ Serialize, Deserialize };
+
 use crate::explorer::Explorer;
 use crate::util::{
     u64ptr, Stdio, YieldPoint,
@@ -22,7 +24,49 @@ use crate::util::{
     IfSupported, Hyperlink
 };
 use crate::disasm::{ self, Disassembler };
-pub use options::Command;
+
+
+/// show text or data
+#[derive(Serialize, Deserialize)]
+#[derive(Debug, Args)]
+#[command(args_conflicts_with_subcommands = true)]
+#[command(flatten_help = true)]
+pub struct Command {
+    /// show address
+    pub address: String,
+
+    /// show length
+    #[arg(short, long)]
+    pub length: Option<u64>,
+
+    /// no search symbol
+    #[arg(long, default_value_t = false)]
+    pub no_symbol: bool,
+
+    /// dump raw data
+    #[arg(long, default_value_t = false)]
+    pub dump: bool,
+
+    /// demangle symbol
+    #[arg(short, long)]
+    pub demangle: bool,
+
+    /// address align
+    #[arg(long)]
+    pub align: Option<u64>,
+
+    /// show source code by dwarf
+    #[arg(long)]
+    pub dwarf: bool,
+
+    /// set dwarf path
+    #[arg(long)]
+    pub dwarf_path: Option<PathBuf>,
+
+    /// show instr top usage by dwarf (bytes)
+    #[arg(long)]
+    pub dwarf_top: bool
+}
 
 impl Command {
     pub async fn exec(self, explorer: &Explorer, stdio: &mut Stdio) -> anyhow::Result<()> {
@@ -48,7 +92,7 @@ async fn by_symbol(
     let map = explorer.cache.addr2sym(&explorer.obj).await;
     let map = map.symbols();
 
-    let (idx, sym_idx)= match map.binary_search_by_key(&addr, |sym| sym.address()) {
+    let (idx, sym_idx) = match map.binary_search_by_key(&addr, |sym| sym.address()) {
         Ok(idx) => (idx, None),
         Err(idx) => {
             let idx = idx.saturating_sub(1);

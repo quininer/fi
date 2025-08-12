@@ -121,8 +121,7 @@ impl Cache {
         self.symlist.get_or_init(async || {
             let mut list = obj.symbol_table()
                 .into_iter()
-                .map(|symtab| symtab.symbols())
-                .flatten()
+                .flat_map(|symtab| symtab.symbols())
                 .map(|sym| sym.index())
                 .collect::<Vec<_>>();
             list.sort_by_key(|&symidx| obj.symbol_by_index(symidx).unwrap().address());
@@ -144,7 +143,7 @@ impl Cache {
             .await
     }
 
-    pub async fn data<'a>(&'a self, obj: &object::File<'static>, idx: SectionIndex)
+    pub async fn data(&self, obj: &object::File<'static>, idx: SectionIndex)
         -> anyhow::Result<Arc<Cow<'static, [u8]>>>
     {
         // fast check

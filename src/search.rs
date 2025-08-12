@@ -1,5 +1,3 @@
-mod options;
-
 use std::{ fs, cmp };
 use std::collections::HashSet;
 use std::io::Write;
@@ -7,11 +5,56 @@ use anyhow::Context;
 use bstr::ByteSlice;
 use object::{ Object, ObjectSection, ObjectSymbol };
 use symbolic_demangle::demangle;
+
+use clap::Args;
+use serde::{ Serialize, Deserialize };
+
 use crate::explorer::Explorer;
 use crate::util::{ Stdio, YieldPoint, MaybePrinter, is_data_section, u64ptr };
 use crate::disasm::Disassembler;
-pub use options::Command;
 
+
+/// search symbol name and data
+#[derive(Serialize, Deserialize)]
+#[derive(Debug, Args)]
+#[command(args_conflicts_with_subcommands = true)]
+#[command(flatten_help = true)]
+pub struct Command {
+    /// search keyword (regex, symbol address)
+    pub keyword: String,
+
+    /// demangle symbol name
+    #[arg(short, long, default_value_t = false)]
+    pub demangle: bool,
+
+    /// search by data instead of symbol name
+    #[arg(long)]
+    pub data: bool,
+
+    /// search for direct calls by symbol address
+    #[arg(long)]
+    pub callsite: bool,
+
+    /// filter section by regex
+    #[arg(short, long)]
+    pub filter_section: Option<String>,
+
+    /// print size (symbol)
+    #[arg(short, long)]
+    pub size: bool,
+
+    /// sort by size (symbol)
+    #[arg(long)]
+    pub sort_size: bool,
+    
+    /// sort by name (symbol)
+    #[arg(long)]
+    pub sort_name: bool,
+
+    /// only print duplicate (symbol)
+    #[arg(long)]
+    pub only_duplicate: bool,
+}
 
 impl Command {
     pub async fn exec(self, explorer: &Explorer, stdio: &mut Stdio) -> anyhow::Result<()> {
@@ -58,10 +101,10 @@ async fn by_symbol(cmd: &Command, explorer: &Explorer, stdio: &mut Stdio)
                 else { continue };
             let section = explorer.obj.section_by_index(section_idx)?;
 
-            if let Ok(section_name) = section.name() {
-                if !rule.is_match(section_name) {
-                    continue
-                }
+            if let Ok(section_name) = section.name()
+                && !rule.is_match(section_name)
+            {
+                continue
             }
         }
         
@@ -95,8 +138,8 @@ async fn by_symbol(cmd: &Command, explorer: &Explorer, stdio: &mut Stdio)
 
     output.sort_unstable_by(|(_, name0, size0), (_, name1, size1)| match (cmd.sort_size, cmd.sort_name) {
         (false, false) => cmp::Ordering::Equal,
-        (true, false) => size0.cmp(&size1),
-        (false, true) => name0.cmp(&name1),
+        (true, false) => size0.cmp(size1),
+        (false, true) => name0.cmp(name1),
         (true, true) => (name0, size0).cmp(&(name1, size1))
     });
 
@@ -141,18 +184,17 @@ async fn by_data(cmd: &Command, explorer: &Explorer, stdio: &mut Stdio)
         .filter(|section| is_data_section(section.kind()))
     {
         // filter section by regex
-        if let Some(rule) = filter.as_ref() {
-            if let Ok(section_name) = section.name() {
-                if !rule.is_match(section_name) {
-                    continue
-                }
-            }
+        if let Some(rule) = filter.as_ref()
+            && let Ok(section_name) = section.name()
+            && !rule.is_match(section_name)
+        {
+            continue
         }
 
         if let Ok(data) = explorer.cache.data(&explorer.obj, section.index()).await {
             let base = section.address();
             
-            for mat in re.find_iter(&*data) {
+            for mat in re.find_iter(&data) {
                 let addr = base + mat.start() as u64;
                 point.yield_now().await;
 
@@ -231,7 +273,7 @@ async fn by_call(cmd: &Command, explorer: &Explorer, stdio: &mut Stdio)
                     Ok(disasm.clone())
                 } else {
                     let disasm2 = Disassembler::new(&explorer.obj)?;
-                    Ok(disasm.get_or_insert(Rc::new(disasm2)).clone())
+                    Ok(disasm.insert(Rc::new(disasm2)).clone())
                 }
             });
             let disasm = match disasm {
@@ -242,7 +284,7 @@ async fn by_call(cmd: &Command, explorer: &Explorer, stdio: &mut Stdio)
 
             let insts = match disasm.disasm_all(data, sym.address()) {
                 Ok(insts) => insts,
-                Err(err) => return Some(Err(err.into()))
+                Err(err) => return Some(Err(err))
             };
             for inst in insts.iter()
                 .ok()?
@@ -267,8 +309,8 @@ async fn by_call(cmd: &Command, explorer: &Explorer, stdio: &mut Stdio)
 
     output.sort_unstable_by(|(idx0, name0, size0), (idx1, name1, size1)| match (cmd.sort_size, cmd.sort_name) {
         (false, false) => idx0.0.cmp(&idx1.0),
-        (true, false) => size0.cmp(&size1),
-        (false, true) => name0.cmp(&name1),
+        (true, false) => size0.cmp(size1),
+        (false, true) => name0.cmp(name1),
         (true, true) => (name0, size0).cmp(&(name1, size1))
     });
 
@@ -308,7 +350,7 @@ fn print_symbol(
         kind,
         name,
     )?;
-    stdout.write_all(&outbuf)?;
+    stdout.write_all(outbuf)?;
     
     Ok(())
 }

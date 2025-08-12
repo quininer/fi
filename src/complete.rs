@@ -1,6 +1,6 @@
 use clap::Args;
 use serde::{ Serialize, Deserialize };
-use super::options;
+use super::Options;
 
 
 /// print shell complete rule
@@ -23,7 +23,7 @@ impl Command {
         use std::io;
         use clap::CommandFactory;
     
-        let mut cmd = options::Options::command();
+        let mut cmd = Options::command();
         let stdout = io::stdout();
         let mut stdout = stdout.lock();
     

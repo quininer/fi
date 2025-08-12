@@ -1,4 +1,5 @@
-mod options;
+#![allow(clippy::uninlined_format_args)]
+
 mod listen;
 mod call;
 mod explorer;
@@ -11,9 +12,31 @@ mod util;
 use anyhow::Context;
 use clap::Parser;
 use directories::ProjectDirs;
+
+use clap::Subcommand;
+use serde::{ Serialize, Deserialize };
+
 use explorer::Explorer;
 use crate::util::Stdio;
-use crate::options::{ Options, Commands };
+
+
+/// Fi - binary analysis tools
+#[derive(Serialize, Deserialize)]
+#[derive(Debug, Parser)]
+#[command(name = "fi")]
+pub struct Options {
+    #[command(subcommand)]
+    pub command: Commands,
+}
+
+#[derive(Serialize, Deserialize)]
+#[derive(Debug, Subcommand)]
+pub enum Commands {
+    Complete(complete::Command),
+    Listen(listen::Command),
+    Search(search::Command),
+    Show(show::Command),
+}
 
 
 fn main() -> anyhow::Result<()> {
