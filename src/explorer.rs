@@ -90,18 +90,17 @@ impl Explorer {
                 Ok(idx) => idx,
                 Err(_) => anyhow::bail!("not found symbol address")
             };
-            match symlist.get(idx + 1) {
-                Some(&sym1) => {
-                    let sym1 = self.obj.symbol_by_index(sym1).unwrap();
-                    sym1.address() - sym.address()
-                },
-                None => match sym.section() {
-                    object::read::SymbolSection::Section(section_idx) => {
-                        let section = self.obj.section_by_index(section_idx)?;
-                        section.address() + section.size() - sym.address()
-                    },
-                    _ => sym.size(),
-                }
+
+            if let Some(&sym1) = symlist.get(idx + 1)
+                && let sym1 = self.obj.symbol_by_index(sym1).unwrap()
+                && sym.section_index() == sym1.section_index()
+            {
+                sym1.address() - sym.address()
+            } else if let Some(section_idx) = sym.section_index() {
+                let section = self.obj.section_by_index(section_idx)?;
+                section.address() + section.size() - sym.address()
+            } else {
+                sym.size()
             }
         };
 
