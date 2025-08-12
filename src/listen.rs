@@ -19,7 +19,11 @@ use server::Server;
 #[command(args_conflicts_with_subcommands = true)]
 #[command(flatten_help = true)]
 pub struct Command {
-    pub path: PathBuf
+    pub path: PathBuf,
+
+    /// set dwarf path
+    #[arg(long)]
+    pub dwarf_path: Option<PathBuf>,    
 }
 
 impl Command {
@@ -46,7 +50,7 @@ impl Command {
             dir.join(path)
         };
 
-        let explorer = Explorer::open(self.path)?;
+        let explorer = Explorer::open(self.path, self.dwarf_path)?;
 
         let rt = tokio::runtime::Builder::new_multi_thread()
             .enable_all()

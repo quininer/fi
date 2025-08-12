@@ -12,6 +12,7 @@ use addr2line::Loader;
 
 pub struct Explorer {
     pub path: PathBuf,
+    pub dwarf_path: Option<PathBuf>,
     pub obj: object::File<'static>,
     pub cache: Cache,
 }
@@ -34,7 +35,7 @@ pub struct DataCache {
 static TARGET: OnceLock<(fs::File, Mmap)> = OnceLock::new();
 
 impl Explorer {
-    pub fn open(path: PathBuf) -> anyhow::Result<Explorer> {
+    pub fn open(path: PathBuf, dwarf_path: Option<PathBuf>) -> anyhow::Result<Explorer> {
         let fd = fs::File::open(&path)?;
         let mmap = unsafe {
             MmapOptions::new().map_copy_read_only(&fd)?
@@ -43,7 +44,7 @@ impl Explorer {
         let obj = object::File::parse(mmap.as_ref())?;
 
         Ok(Explorer {
-            path, obj,
+            path, dwarf_path, obj,
             cache: Cache::default(),
         })
     }

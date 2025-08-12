@@ -59,10 +59,6 @@ pub struct Command {
     #[arg(long)]
     pub dwarf: bool,
 
-    /// set dwarf path
-    #[arg(long)]
-    pub dwarf_path: Option<PathBuf>,
-
     /// show instr top usage by dwarf (bytes)
     #[arg(long)]
     pub dwarf_top: bool
@@ -263,7 +259,7 @@ async fn show_text(
     }
 
     let addr2line = if cmd.dwarf {
-        let path = cmd.dwarf_path.as_deref().unwrap_or(&explorer.path);
+        let path = explorer.dwarf_path.as_deref().unwrap_or(&explorer.path);
         let addr2line = explorer.cache.addr2line.get_or_try_init(|| async {
             addr2line::Loader::new(path).map(Into::into)
         })
