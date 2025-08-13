@@ -1,7 +1,7 @@
 use std::fs;
 use std::io::Write;
 use std::ops::Range;
-use std::path::{ Path, PathBuf };
+use std::path::Path;
 use std::collections::hash_map;
 use std::collections::HashMap;
 use anyhow::Context;
@@ -259,9 +259,13 @@ async fn show_text(
     }
 
     let addr2line = if cmd.dwarf {
-        let path = explorer.dwarf_path.as_deref().unwrap_or(&explorer.path);
+        let path = &explorer.path;
         let addr2line = explorer.cache.addr2line.get_or_try_init(|| async {
-            addr2line::Loader::new(path).map(Into::into)
+            if let Some(dwarf_path) = explorer.dwarf_path.as_ref() {
+                addr2line::Loader::new_with_sup(path, Some(dwarf_path)).map(Into::into)
+            } else {
+                addr2line::Loader::new(path).map(Into::into)
+            }
         })
             .await
             .map_err(|err| anyhow::format_err!("addr2line: {:?}", err))?;
