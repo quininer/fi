@@ -38,5 +38,5 @@ addr2line = { version = "0.25", features = [ "wasm" ] }
 # feature
 regex = { version = "1", default-features = false, features = [ "std", "perf" ] }
 capstone = "0.13"
-wasmparser = { version = "0.236", default-features = false }
+wasmparser = { version = "0.236", default-features = false, features = [ "simd" ] }
 rayon = "1"
