@@ -254,13 +254,6 @@ async fn by_call(cmd: &Command, explorer: &Explorer, stdio: &mut Stdio)
                 return None;
             }
 
-            let mangled_name = sym.name().unwrap();
-            let name = if cmd.demangle {
-                demangle(mangled_name)
-            } else {
-                (*mangled_name).into()
-            };
-
             let offset = (sym.address() - section.address()) as usize;
             let size = match explorer.symbol_size(symlist, symidx) {
                 Ok(size) => size,
@@ -292,13 +285,19 @@ async fn by_call(cmd: &Command, explorer: &Explorer, stdio: &mut Stdio)
             {
                 let addr = match disasm.operand2addr(&inst) {
                     Ok(Some(addr)) => addr,
-                    Ok(None) => return None,
+                    Ok(None) => continue,
                     Err(err) => return Some(Err(err))
                 };
                 
                 if let Some((_name, addr)) = show::query_symbol_by_addr(explorer, addr2sym, dyn_rela, addr)
                     && addr == address
                 {
+                    let mangled_name = sym.name().unwrap();
+                    let name = if cmd.demangle {
+                        demangle(mangled_name)
+                    } else {
+                        (*mangled_name).into()
+                    };
                     return Some(Ok((symidx, name, size)));
                 }
             }
