@@ -108,10 +108,7 @@ impl Disassembler {
                             X86OperandType::Mem(mem)
                                 if X86RegType::from(mem.base().0) == X86_REG_RIP =>
                             {
-                                mem.disp()
-                                    .try_into()
-                                    .ok()
-                                    .map(|disp: u64| inst.address() + disp)
+                                inst.address().checked_add_signed(mem.disp())
                             },
                             _ => None
                         }
