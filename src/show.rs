@@ -527,7 +527,12 @@ pub(crate) fn query_symbol_by_addr(
     } else {
         // section check
         {
-            let section = explorer.obj.section_by_name(".got")?;
+            let got = match explorer.obj.format() {
+                object::BinaryFormat::Elf => ".got",
+                object::BinaryFormat::MachO => "__got",
+                _ => return None,
+            };
+            let section = explorer.obj.section_by_name(got)?;
 
             let start = section.address();
             let end = start + section.size();

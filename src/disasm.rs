@@ -77,12 +77,13 @@ impl Disassembler {
 
     pub fn operand2addr(&self, inst: &Inst<'_>) -> anyhow::Result<Option<u64>> {
         use capstone::arch::{ ArchDetail, DetailsArchInsn };
-        use capstone::arch::x86::X86OperandType;
-        use capstone::arch::x86::X86Reg::{ Type as X86RegType, X86_REG_RIP };
         use capstone::InsnGroupType::{ Type as InsnGroupType, CS_GRP_CALL, CS_GRP_JUMP };
         
         match (self, inst) {
             (Disassembler::X86_64(disasm), Inst::X86_64(inst)) => {
+                use capstone::arch::x86::X86OperandType;
+                use capstone::arch::x86::X86Reg::{ Type as X86RegType, X86_REG_RIP };
+
                 let Ok(detail) = disasm.insn_detail(inst)
                     else {
                         return Ok(None);
@@ -117,6 +118,38 @@ impl Disassembler {
                     },
                     _ => None
                 })
+            },
+            (Disassembler::Aarch64(disasm), Inst::Aarch64(inst)) => {
+                use capstone::arch::arm64::Arm64OperandType;
+
+                let Ok(detail) = disasm.insn_detail(inst)
+                    else {
+                        return Ok(None);
+                    };
+                let Some(_group_id) = detail.groups()
+                    .iter()
+                    .map(|id| InsnGroupType::from(id.0))
+                    .find(|&id| matches!(id, CS_GRP_CALL | CS_GRP_JUMP))
+                else {
+                    return Ok(None)
+                };
+
+                Ok(match detail.arch_detail() {
+                    ArchDetail::Arm64Detail(inst_detail) => {
+                        let Some(operand) = inst_detail.operands().next()
+                            else {
+                                return Ok(None)
+                            };
+
+                        match operand.op_type {
+                            Arm64OperandType::Imm(imm) => imm.try_into()
+                                .ok()
+                                .map(|addr: u64| addr),
+                            _ => None
+                        }
+                    },
+                    _ => None
+                })                
             },
             _ => anyhow::bail!("unsupported arch")
         }
