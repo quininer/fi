@@ -121,6 +121,25 @@ async fn by_symbol(
         )
             .ok()
             .context("not found symbol")?;
+
+        let stop = |&symlist_idx: &usize| {
+            let symidx = symlist[symlist_idx];
+            explorer.obj.symbol_by_index(symidx)
+                .map(|sym| sym.address() == map[idx].address())
+                .unwrap_or_default()
+        };
+            
+        let symlist_idx = (symlist_idx..symlist.len())
+            .take_while(stop)
+            .chain((0..symlist_idx).rev().take_while(stop))
+            .find_map(|idx| {
+                let symidx = symlist[idx];
+                explorer.obj.symbol_by_index(symidx)
+                    .ok()
+                    .filter(|sym| !matches!(sym.kind(), SymbolKind::Unknown))
+                    .map(|_| idx)
+            })
+            .unwrap_or(symlist_idx);
         symlist[symlist_idx]
     };
     let sym = explorer.obj.symbol_by_index(sym_idx)?;
@@ -140,7 +159,7 @@ async fn by_symbol(
 
     if cmd.dump {
         dump_data(data, stdio).await?;
-    } else if matches!(sym.kind(), SymbolKind::Text) {
+    } else if matches!(sym.kind(), SymbolKind::Text) || matches!(section.kind(), SectionKind::Text) {
         show_text(
             cmd,
             explorer,
@@ -295,7 +314,14 @@ async fn show_text(
             "symbol:".if_supported(stdio.colored, |a| a.cyan()),
             name.if_supported(cmd.demangle, |name| demangle(name))
         )?;        
-    }    
+    }
+
+    writeln!(
+        stdio.stdout,
+        "{} {}",
+        "size:".if_supported(stdio.colored, |a| a.cyan()),
+        data.len(),
+    )?;
 
     let mut files = IndexSet::new();
     let mut texts = HashMap::new();
@@ -479,6 +505,13 @@ async fn show_data(
             name.if_supported(cmd.demangle, |name| demangle(name))
         )?;
     }
+
+    writeln!(
+        stdio.stdout,
+        "{} {}",
+        "size:".if_supported(stdio.colored, |a| a.cyan()),
+        data.len(),
+    )?;    
 
     let addr = start;
     let width = 16;
