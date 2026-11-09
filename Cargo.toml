@@ -25,18 +25,18 @@ passfd = "0.1"
 
 # object
 memmap2 = "0.9"
-object = { version = "0.37", features = [ "wasm" ] }
+object = { version = "0.40", features = [ "wasm" ] }
 indexmap = "2"
 aho-corasick = "1"
-symbolic-demangle = { version = "12", default-features = false, features = [
+symbolic-demangle = { version = "13", default-features = false, features = [
 	"rust",
 	"cpp",
 	"msvc"
 ] }
-addr2line = { version = "0.25", features = [ "wasm" ] }
+addr2line = { version = "0.27", features = [ "wasm" ] }
 
 # feature
 regex = { version = "1", default-features = false, features = [ "std", "perf" ] }
-capstone = "0.13"
-wasmparser = { version = "0.236", default-features = false, features = [ "simd" ] }
+capstone = "0.14"
+wasmparser = { version = "0.263", default-features = false, features = [ "simd" ] }
 rayon = "1"

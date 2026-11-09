@@ -48,7 +48,7 @@ async fn exec(
     let start: Start = cbor4ii::serde::from_slice(&buf)?;
     let pid = stream.peer_cred()?.pid();
 
-    println!("{:?} {:?}", pid, &start.options);
+    println!("{:?} {:?}", pid, start.options);
 
     let stdin = recv_fd(&stream).await?;
     let stdout = recv_fd(&stream).await?;

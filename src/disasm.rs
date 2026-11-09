@@ -18,7 +18,7 @@ pub enum InstIter<'a> {
     X86_64(slice::Iter<'a, capstone::Insn<'a>>),
     Aarch64(slice::Iter<'a, capstone::Insn<'a>>),
     Wasm {
-        base: usize,
+        base: u64,
         data: &'a [u8],
         iter: Peekable<wasmparser::OperatorsIteratorWithOffsets<'a>>,
     },
@@ -29,7 +29,7 @@ pub enum Inst<'a> {
     Aarch64(&'a capstone::Insn<'a>),
     Wasm {
         data: &'a [u8],
-        offset: usize,
+        offset: u64,
         operator: wasmparser::Operator<'a>
     }
 }
@@ -66,7 +66,7 @@ impl Disassembler {
             Disassembler::X86_64(disasm) => disasm.disasm_all(code, addr).map(InstList::X86_64)?,
             Disassembler::Aarch64(disasm) => disasm.disasm_all(code, addr).map(InstList::Aarch64)?,
             Disassembler::Wasm => {
-                let reader = wasmparser::BinaryReader::new(code, addr.try_into()?);
+                let reader = wasmparser::BinaryReader::new(code, addr);
                 let func = wasmparser::FunctionBody::new(reader);
                 InstList::Wasm(func)
             }
@@ -187,10 +187,10 @@ impl<'a> Iterator for InstIter<'a> {
 
                 next.map(|result| result
                     .map(|(operator, offset)| {
-                        let base = offset - *base;
-                        let mut data = &data[base..];
+                        let start = (offset - *base) as usize;
+                        let mut data = &data[start..];
                         if let Some(peek) = peek {
-                            data = &data[..peek - offset];
+                            data = &data[..(peek - offset) as usize];
                         }
                         Inst::Wasm { data, offset, operator }
                     })
@@ -206,7 +206,7 @@ impl Inst<'_> {
         match self {
             Inst::X86_64(inst) => inst.address(),
             Inst::Aarch64(inst) => inst.address(),
-            Inst::Wasm { offset, .. } => (*offset) as u64
+            Inst::Wasm { offset, .. } => *offset
         }
     }
 

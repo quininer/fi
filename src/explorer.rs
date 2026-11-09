@@ -64,8 +64,8 @@ impl Explorer {
                     'd'
                 }
                 Ok(SectionKind::ReadOnlyData) | Ok(SectionKind::ReadOnlyString) => 'r',
+                // object 0.40 folded `SectionKind::Common` into `UninitializedData`.
                 Ok(SectionKind::UninitializedData) | Ok(SectionKind::UninitializedTls) => 'b',
-                Ok(SectionKind::Common) => 'C',
                 _ => '?',
             },
             _ => '?',
