@@ -119,8 +119,8 @@ pub enum EitherPrinter<A, B> {
 
 impl fmt::Display for HexPrinter<'_> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        debug_assert!(self.0.len() <= self.1);
-        
+        // data longer than the width is truncated, like an x86 instruction of
+        // up to 15 bytes in the 8 byte column of `show`
         for &b in self.0.iter().take(self.1) {
             write!(f, "{:02x} ", b)?;
         }
