@@ -54,24 +54,19 @@ fi search <regex|address>      list matching symbols
 
 fi show <address>              disassemble the symbol containing <address>
   -d, --demangle
-      --dwarf                  interleave source lines from DWARF
-      --dwarf --dwarf-top      byte count per function, sorted ascending
+      --dwarf[=<layer>]        interleave source lines from DWARF
+      --dwarf --dwarf-top      byte count per inlined frame, sorted ascending
       --dump                   raw bytes
       --no-symbol -l <len> [--align n]   dump a section range without symbol lookup
 ```
 
+`--dwarf-top` charges bytes to the inline frame picked by `--dwarf=<layer>`: `1` (the default)
+charges every frame to the real function, `2` splits the body between the functions the real
+function inlined directly, `-1` charges an inlined helper to its caller.
+
 ## Gotchas (each one fails or misleads silently)
 
 - **`--dwarf-top` needs `--dwarf`** as well, otherwise `exec failed: need --dward`.
-- **`--dwarf-top` reports the second-innermost inline frame**, so an inlined helper is
-  counted under its caller. For exact per-inlined-function code, read DWARF directly:
-
-  ```bash
-  llvm-dwarfdump --name='<mangled inlined function>' <binary>   # DW_TAG_inlined_subroutine
-  ```
-
-  `DW_AT_ranges` (or `DW_AT_low_pc`/`DW_AT_high_pc`) gives its address ranges;
-  `DW_AT_call_line` gives the call site.
 - `fi show <address>` always disassembles the **whole containing symbol** starting at its
   first byte; `-l/--length` is ignored for text symbols. Slice the output by address instead.
 - On large binaries `--dwarf` and `--dwarf-top` are slow: redirect to a file and read the
@@ -95,11 +90,10 @@ same harness to confirm a codegen change, and check code size the same way (`-s`
 Which code belongs to an inlined helper:
 
 ```bash
-llvm-dwarfdump --name="$($FI search <addr> | head -1 | awk '{print $NF}' | ...mangled...)" ...
+$FI show <addr> -d --dwarf-top              # 1 (default): frames charged to the real function
+$FI show <addr> -d --dwarf=2 --dwarf-top    # 2: split between the directly inlined functions
+$FI show <addr> -d --dwarf=-1 --dwarf-top   # -1: a helper is charged to its caller
 ```
-
-Practical form: get the mangled name with `nm <binary> | grep <function>`, then sum the
-`DW_AT_ranges` spans.
 
 Who calls a function (slow on large binaries; needs a text symbol address):
 

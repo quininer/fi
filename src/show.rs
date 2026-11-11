@@ -55,13 +55,52 @@ pub struct Command {
     #[arg(long)]
     pub align: Option<u64>,
 
-    /// show source code by dwarf
-    #[arg(long)]
-    pub dwarf: bool,
+    /// show source code by dwarf, `--dwarf=<layer>` picks the inlined frame
+    /// owning the bytes of an address, see `--dwarf-top`.
+    ///
+    /// `1` (the default) is the outermost frame, `2` the frame below it, `0` is the
+    /// innermost frame, `-1` is one frame above it, `-2` two frames above it, ...
+    #[arg(long, num_args = 0..=1, default_missing_value = "1", require_equals = true, value_name = "layer")]
+    pub dwarf: Option<i32>,
 
     /// show instr top usage by dwarf (bytes)
     #[arg(long)]
     pub dwarf_top: bool
+}
+
+/// The layer used when `--dwarf` carries no value, see the `dwarf` argument.
+const DEFAULT_LAYER: i32 = 1;
+
+/// Describe which inlined frame owns the bytes, see `pick_frame`.
+fn describe_layer(layer: i32) -> String {
+    match layer {
+        -1 => "-1, the caller of the innermost frame".to_owned(),
+        0 => "0, the innermost frame".to_owned(),
+        1 => "1, the outermost frame".to_owned(),
+        2.. => format!("{layer}, {} frames below the outermost frame", layer - 1),
+        ..= -2 => format!("{layer}, {} frames above the innermost frame", layer.unsigned_abs()),
+    }
+}
+
+/// Pick the frame owning the bytes of an address, counted from the innermost
+/// inlined frame (`layer <= -1`, `-1` being the caller of the innermost one,
+/// `0` being the innermost one itself) or from the outermost one (`layer >= 1`).
+fn pick_frame(frames: &[String], layer: i32) -> Option<&str> {
+    let count = frames.len();
+    if count == 0 {
+        return None;
+    }
+
+    // frames are ordered from the innermost one to the outermost one
+    let idx = if layer <= 0 {
+        // `0` is the innermost frame, `-layer` is `0 + |layer|`
+        (layer.unsigned_abs() as usize).min(count - 1)
+    } else {
+        // `1` is the outermost frame
+        count - (layer as usize).min(count)
+    };
+
+    frames.get(idx).map(|frame| frame.as_str())
 }
 
 impl Command {
@@ -277,7 +316,7 @@ async fn show_text(
         column: Option<u32>
     }
 
-    let addr2line = if cmd.dwarf {
+    let addr2line = if cmd.dwarf.is_some() {
         let path = &explorer.path;
         let addr2line = explorer.cache.addr2line.get_or_try_init(|| async {
             if let Some(dwarf_path) = explorer.dwarf_path.as_ref() {
@@ -354,9 +393,21 @@ async fn show_text(
     if cmd.dwarf_top {
         use addr2line::fallible_iterator::FallibleIterator;
 
+        let layer = cmd.dwarf.context("need --dward")?;
         let addr2line = addr2line.as_ref().context("need --dward")?;
         let addr2line = addr2line.lock().await;
         let mut map: IndexMap<_, u64> = IndexMap::new();
+
+        if layer != DEFAULT_LAYER {
+            let desc = describe_layer(layer);
+
+            writeln!(
+                stdio.stdout,
+                "{}",
+                format!("# inline layer: {desc}")
+                    .if_supported(stdio.colored, |desc| desc.dimmed()),
+            )?;
+        }
 
         for line in &lines {
             let len = line.range.end - line.range.start;
@@ -364,19 +415,16 @@ async fn show_text(
             let mut iter = addr2line.find_frames(line.range.start)
                 .map_err(|err| anyhow::format_err!("addr2line: {:?}", err))?
                 .filter_map(|frame| Ok(frame.function))
-                .filter_map(|name| Ok(name.raw_name().ok().map(|name| name.into_owned())))
-                .peekable();
-            let mut last = None;
-            while let Some(next) = iter.next()? {
-                if iter.peek()?.is_some() || last.is_none() {
-                    last = Some(next);
-                }
+                .filter_map(|name| Ok(name.raw_name().ok().map(|name| name.into_owned())));
+
+            let mut frames = Vec::new();
+            while let Some(frame) = iter.next()? {
+                frames.push(frame);
             }
 
-            if let Some(frame) = last {
-                *map.entry(frame).or_default() += len;
-            } else {
-                *map.entry("<unknown>".into()).or_default() += len;
+            match pick_frame(&frames, layer) {
+                Some(frame) => *map.entry(frame.to_owned()).or_default() += len,
+                None => *map.entry("<unknown>".into()).or_default() += len,
             }
         }
 
