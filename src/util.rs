@@ -50,19 +50,29 @@ pub async fn recv_fd(stream: &UnixStream) -> io::Result<RawFd> {
     }
 }
 
+/// Parse an address, either decimal or hexadecimal with a `0x` / `0X` prefix.
+///
+/// Hexadecimal digits need no zero padding, so both `0x141a781` and
+/// `0x000000000141a781` are accepted.
 pub fn u64ptr(value: &str) -> anyhow::Result<u64> {
     use anyhow::Context;
+    use std::num::IntErrorKind;
 
-    let value = if let Some(value) = value.strip_prefix("0x") {
-        let mut buf = [0; 8];
-        let n = data_encoding::HEXLOWER_PERMISSIVE.decode_len(value.len())?;
-        let n = buf.len().checked_sub(n).context("hex value is greater than 64bit")?;
-        data_encoding::HEXLOWER_PERMISSIVE
-            .decode_mut(value.as_bytes(), &mut buf[n..])
-            .map_err(|err| anyhow::format_err!("hex decode failed: {:?}", err))?;
-        u64::from_be_bytes(buf)
-    } else {
-        value.parse::<u64>().context("number parse failed")?
+    let value = match value.strip_prefix("0x").or_else(|| value.strip_prefix("0X")) {
+        Some(hex) => {
+            anyhow::ensure!(!hex.is_empty(), "hex value is empty");
+            anyhow::ensure!(
+                !hex.as_bytes().first().is_some_and(|c| matches!(c, b'+' | b'-')),
+                "hex value must not have a sign"
+            );
+
+            u64::from_str_radix(hex, 16).map_err(|err| match err.kind() {
+                IntErrorKind::PosOverflow =>
+                    anyhow::format_err!("hex value is greater than 64bit"),
+                _ => anyhow::format_err!("hex parse failed: {value:?}"),
+            })?
+        }
+        None => value.parse::<u64>().context("number parse failed")?
     };
 
     Ok(value)
@@ -202,5 +212,42 @@ impl<T: fmt::Display, L: AsRef<str>> fmt::Display for Hyperlink<T, L> {
         write!(f, "\x1B]8;;{}\x1B\\", self.link.as_ref())?;
         fmt::Display::fmt(&self.text, f)?;
         write!(f, "\x1B]8;;\x1B\\")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::u64ptr;
+
+    #[test]
+    fn parse_address() {
+        // decimal
+        assert_eq!(u64ptr("0").unwrap(), 0);
+        assert_eq!(u64ptr("4718433").unwrap(), 0x47ff61);
+        assert_eq!(u64ptr("1000").unwrap(), 1000);
+
+        // padded hex
+        assert_eq!(u64ptr("0x000000000141a781").unwrap(), 0x141a781);
+        assert_eq!(u64ptr("0xffffffffffffffff").unwrap(), u64::MAX);
+
+        // unpadded hex, odd number of digits
+        assert_eq!(u64ptr("0x0").unwrap(), 0);
+        assert_eq!(u64ptr("0x1").unwrap(), 1);
+        assert_eq!(u64ptr("0x141a781").unwrap(), 0x141a781);
+        assert_eq!(u64ptr("0XFFFF").unwrap(), 0xffff);
+        assert_eq!(u64ptr("0x1000000000000000").unwrap(), 1 << 60);
+    }
+
+    #[test]
+    fn reject_bad_address() {
+        assert!(u64ptr("").is_err());
+        assert!(u64ptr("0x").is_err());
+        assert!(u64ptr("0x1_0").is_err());
+        assert!(u64ptr("0xg").is_err());
+        assert!(u64ptr("0x-1").is_err());
+        assert!(u64ptr("0x+1").is_err());
+        assert!(u64ptr("0x10000000000000000").is_err());
+        assert!(u64ptr("-1").is_err());
+        assert!(u64ptr("18446744073709551616").is_err());
     }
 }

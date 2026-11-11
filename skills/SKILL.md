@@ -62,9 +62,6 @@ fi show <address>              disassemble the symbol containing <address>
 
 ## Gotchas (each one fails or misleads silently)
 
-- **Addresses need an even number of hex digits.** `0x141a781` fails with
-  `exec failed: invalid length at 6`; write `0x000000000141a781`. Copy the `{:018p}` form
-  that `fi search` prints. Same rule for `--callsite`.
 - **`--dwarf-top` needs `--dwarf`** as well, otherwise `exec failed: need --dward`.
 - **`--dwarf-top` reports the second-innermost inline frame**, so an inlined helper is
   counted under its caller. For exact per-inlined-function code, read DWARF directly:
