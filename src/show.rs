@@ -35,7 +35,7 @@ pub struct Command {
     /// show address
     pub address: String,
 
-    /// show length
+    /// show `length` bytes from the address, clamped to the symbol when one is found
     #[arg(short, long)]
     pub length: Option<u64>,
 
@@ -186,11 +186,24 @@ async fn by_symbol(
     let section = explorer.obj.section_by_index(section_idx)?;
 
     let data = explorer.cache.data(&explorer.obj, section_idx).await?;
-    let offset = (sym.address() - section.address()) as usize;
-    let size = explorer.symbol_size(symlist, sym_idx)?;
-    let size = size as usize;
+    let sym_size = explorer.symbol_size(symlist, sym_idx)?;
+    let sym_end = sym.address() + sym_size;
+
+    // `-l` shows `length` bytes from `<address>`, clamped to the symbol, or to the
+    // section when the symbol carries no size; without it the whole symbol is shown
+    let (start, end) = match cmd.length {
+        Some(len) => {
+            let bound = if sym_size > 0 { sym_end } else { section.address() + section.size() };
+            (addr, addr.saturating_add(len).min(bound).max(addr))
+        },
+        None => (sym.address(), sym_end),
+    };
+
+    let offset = (start - section.address()) as usize;
+    let size = (end - start) as usize;
 
     let data = if !matches!(section.kind(), SectionKind::UninitializedData | SectionKind::UninitializedTls) {
+        let size = size.min(data.len().saturating_sub(offset));
         &data[offset..][..size]
     } else {
         &[]
@@ -204,6 +217,7 @@ async fn by_symbol(
             explorer,
             section_idx,
             sym.index(),
+            start,
             data,
             stdio
         ).await?;
@@ -212,7 +226,7 @@ async fn by_symbol(
             cmd,
             section.name().ok(),
             Some(map[idx].name()),
-            sym.address(),
+            start,
             data,
             stdio
         ).await?;        
@@ -273,6 +287,7 @@ async fn show_text(
     explorer: &Explorer,
     section_idx: SectionIndex,
     symbol_idx: SymbolIndex,
+    start: u64,
     data: &[u8],
     stdio: &mut Stdio    
 ) -> anyhow::Result<()> {
@@ -362,23 +377,41 @@ async fn show_text(
         data.len(),
     )?;
 
+    // the shown window, `-l` starts at the address instead of the symbol start
+    if cmd.length.is_some() {
+        writeln!(
+            stdio.stdout,
+            "{} {:018p}..{:018p}",
+            "range:".if_supported(stdio.colored, |a| a.cyan()),
+            start as *const (),
+            (start + data.len() as u64) as *const (),
+        )?;
+    }
+
     let mut files = IndexSet::new();
     let mut texts = HashMap::new();
     let lines = if let Some(addr2line) = addr2line.as_ref() {
         let addr2line = addr2line.lock().await;
+        let window_end = start + data.len() as u64;
 
         let mut lines = addr2line.find_location_range(
-            symbol.address(),
-            symbol.address() + symbol.size()
+            start,
+            window_end
         )
             .map_err(|err| anyhow::format_err!("addr2line: {:?}", err))?
-            .map(|(offset, len, location)| Line {
-                range: offset..offset + len,
-                file: location.file.map(|file| {
-                    files.insert_full(file.to_owned()).0
-                }),
-                line: location.line,
-                column: location.column
+            // the records only overlap the range, trim them to the shown window
+            .filter_map(|(offset, len, location)| {
+                let start = offset.max(start);
+                let end = offset.saturating_add(len).min(window_end);
+
+                (start < end).then(|| Line {
+                    range: start..end,
+                    file: location.file.map(|file| {
+                        files.insert_full(file.to_owned()).0
+                    }),
+                    line: location.line,
+                    column: location.column
+                })
             })
             .collect::<Vec<_>>();
         lines.sort_by_key(|line| line.range.start);
@@ -448,7 +481,7 @@ async fn show_text(
         let disasm = Disassembler::new(&explorer.obj)?;
         let disasm = &disasm;
 
-        let insts = disasm.disasm_all(data, symbol.address())?;
+        let insts = disasm.disasm_all(data, start)?;
         for inst in insts.iter()? {
             let inst = inst?;
             let inst = &inst;
