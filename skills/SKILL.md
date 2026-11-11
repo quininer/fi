@@ -42,22 +42,13 @@ source files still exist at the paths recorded in DWARF.
 
 ## Commands
 
-```
-fi search <regex|address>      list matching symbols
-  -d, --demangle               demangle names (use it; Rust names are otherwise mangled)
-  -s, --size                   print symbol size, plus a total
-      --sort-size | --sort_name    order results
-      --only-duplicate         show names that occur more than once (inlining copies)
-  -F, --filter-section <re>    restrict to sections
-      --data                   search bytes of data sections instead of names
-      --callsite <addr>        disassemble every text symbol and list those calling <addr>
+`fi listen <binary>` holds the memory map and answers over a Unix socket; `fi search` and
+`fi show` query it. The option lists live in `fi search -h` and `fi show -h` (`--help` also
+explains `--dwarf=<layer>`), so they are not repeated here.
 
-fi show <address>              disassemble the symbol containing <address>
-  -d, --demangle
-      --dwarf[=<layer>]        interleave source lines from DWARF
-      --dwarf --dwarf-top      byte count per inlined frame, sorted ascending
-      --dump                   raw bytes
-      --no-symbol -l <len> [--align n]   dump a section range without symbol lookup
+```bash
+$FI search <regex|address>   # matching symbols; -d demangles, -s adds sizes and a total
+$FI show <address>           # the containing symbol; -d demangles, --dwarf adds source
 ```
 
 `--dwarf-top` charges bytes to the inline frame picked by `--dwarf=<layer>`: `1` (the default)
@@ -67,8 +58,6 @@ function inlined directly, `-1` charges an inlined helper to its caller.
 ## Gotchas (each one fails or misleads silently)
 
 - **`--dwarf-top` needs `--dwarf`** as well, otherwise `exec failed: need --dward`.
-- `fi show <address>` always disassembles the **whole containing symbol** starting at its
-  first byte; `-l/--length` is ignored for text symbols. Slice the output by address instead.
 - On large binaries `--dwarf` and `--dwarf-top` are slow: redirect to a file and read the
   window you need, or run the command in the background.
 - Output is written by the server through the passed file descriptors, so redirection works
@@ -90,9 +79,9 @@ same harness to confirm a codegen change, and check code size the same way (`-s`
 Which code belongs to an inlined helper:
 
 ```bash
-$FI show <addr> -d --dwarf-top              # 1 (default): frames charged to the real function
-$FI show <addr> -d --dwarf=2 --dwarf-top    # 2: split between the directly inlined functions
-$FI show <addr> -d --dwarf=-1 --dwarf-top   # -1: a helper is charged to its caller
+$FI show <addr> -d --dwarf --dwarf-top        # 1 (default): frames charged to the real function
+$FI show <addr> -d --dwarf=2 --dwarf-top      # 2: split between the directly inlined functions
+$FI show <addr> -d --dwarf=-1 --dwarf-top     # -1: a helper is charged to its caller
 ```
 
 Who calls a function (slow on large binaries; needs a text symbol address):
@@ -104,7 +93,7 @@ $FI search --callsite 0x0000000000412a30 -d
 Largest symbols in a section:
 
 ```bash
-$FI search -d -s --sort-size '' -F '\.text' | tail -30
+$FI search -d -s --sort-size '' -f '\.text' | tail -30
 ```
 
 Cross-check hot code with `perf record -g` / `perf annotate` on the same binary; use `fi`
